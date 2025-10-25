@@ -4,7 +4,7 @@ Chrome extension (Manifest V3 + TypeScript) to export current ChatGPT conversati
 
 ## Install
 1. `npm i`
-2. Add icons to `icons/` (16/48/128 png) or remove from manifest.
+2. Add icons to `icons/` (16/48/128 png) or remove from `manifest.json`.
 3. Build once: `npm run build` (or `npm run watch`).
 4. Go to `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select the `dist/` folder.
 

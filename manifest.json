@@ -1,13 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Chatworthy (Dev)",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Dev-only exporter for ChatGPT chats (Markdown / JSON).",
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },
   "permissions": [
     "activeTab",
     "scripting",
