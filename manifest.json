@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "Chatworthy (Dev)",
+  "version": "0.1.0",
+  "description": "Dev-only exporter for ChatGPT chats (Markdown / JSON).",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "downloads",
+    "storage",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Chatworthy",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "injected.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "export-chat": {
+      "description": "Export current chat (Markdown)",
+      "suggested_key": {
+        "default": "Ctrl+Shift+E",
+        "mac": "Command+Shift+E"
+      }
+    }
+  },
+  "options_page": "options.html"
+}

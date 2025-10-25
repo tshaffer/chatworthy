@@ -1,0 +1,15 @@
+{
+  "name": "chatworthy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run clean && tsx scripts/build.ts",
+    "watch": "tsx scripts/build.ts --watch",
+    "clean": "rm -rf dist && mkdir -p dist"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "tsx": "^4.19.0"
+  }
+}
