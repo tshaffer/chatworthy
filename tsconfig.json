@@ -6,7 +6,8 @@
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
-    "types": ["chrome"]
+    "types": ["chrome"],
+    "lib": ["ES2021", "DOM"]   // DOM is helpful for content/popup code
   },
   "include": ["src/**/*", "scripts/**/*"]
 }

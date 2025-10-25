@@ -1,4 +1,3 @@
-
 {
   "name": "chatworthy",
   "version": "0.1.1",
@@ -10,6 +9,7 @@
     "clean": "rm -rf dist && mkdir -p dist"
   },
   "devDependencies": {
+    "chrome-types": "^0.1.384",
     "esbuild": "^0.24.0",
     "tsx": "^4.19.0"
   }

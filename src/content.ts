@@ -2,6 +2,9 @@
 import type { ChatTurn, ConversationExport } from './types';
 import { toMarkdown } from './utils/exporters';
 
+// Content script sentinel
+console.log('[Chatworthy] content script loaded, version 0.1.1');
+
 function getTitle(): string {
   const h1 = document.querySelector('h1, header h1, [data-testid="conversation-title"]');
   const title = (h1?.textContent || document.title || 'ChatGPT Conversation').trim();
