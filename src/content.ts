@@ -31,7 +31,7 @@ const OBSERVER_THROTTLE_MS = 200;
 (() => {
   const w = window as any;
 
-  // Emergency off: add ?chatsworthy-disable to URL or set localStorage key
+  // Emergency off
   try {
     const disabled =
       localStorage.getItem('chatsworthy:disable') === '1' ||
@@ -40,17 +40,16 @@ const OBSERVER_THROTTLE_MS = 200;
       console.warn('[Chatsworthy] Disabled by kill switch');
       return;
     }
-  } catch { /* ignore */ }
+  } catch {}
 
-  // Skip if we already initialized (or if injected in an iframe)
+  // Singleton guard
   if (w.__chatsworthy_init__) return;
   w.__chatsworthy_init__ = true;
 
-  if (window.top !== window) {
-    // If you need iframes, remove this return
-    return;
-  }
+  // Skip iframes unless you need them
+  if (window.top !== window) return;
 
+  // Defer into init with guards
   init().catch(err => console.error('[Chatsworthy] init failed', err));
 })();
 
@@ -244,40 +243,71 @@ function ensureFloatingUI() {
 
 // ---- Observer: throttled + self-filtering ------------------
 
+// ---- Observer: throttled + self-filtering ------------------
+
+// Keep a nullable handle
+let mo: MutationObserver | null = null;
 let observersSuspended = false;
+
 function suspendObservers(v: boolean) {
   observersSuspended = v;
 }
 
 let lastObserverRun = 0;
-const mo = new MutationObserver(mutationList => {
-  if (observersSuspended) return;
 
-  // Ignore any mutations under our own root to avoid self-trigger loops
-  const root = document.getElementById(ROOT_ID);
-  if (root) {
-    for (const m of mutationList) {
-      const target = m.target as Node;
-      if (root.contains(target)) {
-        return; // skip this batch entirely
+function makeObserver(): MutationObserver {
+  // Type-safe creation inside a function
+  return new MutationObserver((mutationList) => {
+    if (observersSuspended) return;
+
+    // Ignore any mutations under our own root to avoid self-trigger loops
+    const root = document.getElementById(ROOT_ID);
+    if (root) {
+      for (const m of mutationList) {
+        const target = m.target as Node;
+        if (root.contains(target)) {
+          return; // skip this batch entirely
+        }
       }
     }
-  }
 
-  // Throttle observer-driven updates
-  const now = performance.now();
-  if (now - lastObserverRun < OBSERVER_THROTTLE_MS) return;
-  lastObserverRun = now;
+    // Throttle observer-driven updates
+    const now = performance.now();
+    if (now - lastObserverRun < OBSERVER_THROTTLE_MS) return;
+    lastObserverRun = now;
 
-  scheduleEnsure();
-});
+    scheduleEnsure();
+  });
+}
 
 function startObserving() {
+  // Hard guards: only in page contexts with a DOM
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    console.warn('[Chatsworthy] No DOM available; skipping observer');
+    return;
+  }
+  if (typeof MutationObserver === 'undefined') {
+    console.warn('[Chatsworthy] MutationObserver not available; skipping observer');
+    return;
+  }
+
+  // Scope to body first, fall back to documentElement
   const target = document.body || document.documentElement;
+  if (!target) {
+    console.warn('[Chatsworthy] No observation target; skipping observer');
+    return;
+  }
+
+  // Create once
+  if (!mo) mo = makeObserver();
+
+  // Defensive: disconnect before re-observe (in case of re-init)
+  try { mo.disconnect(); } catch {}
+
   mo.observe(target, {
     childList: true,
     subtree: true,
-    attributes: false, // keep false unless you truly need attribute changes
+    attributes: false,
   });
 }
 
@@ -304,6 +334,20 @@ function scheduleEnsure() {
 // ---- Init --------------------------------------------------
 
 async function init() {
+  // Only run on intended hosts (extra safety)
+  const host = location.host || '';
+  if (!/^(chatgpt\.com|chat\.openai\.com)$/i.test(host)) {
+    console.warn('[Chatsworthy] Host not allowed; skipping init:', host);
+    return;
+  }
+
+  // Wait for a usable DOM before touching it
+  if (document.readyState === 'loading') {
+    await new Promise<void>((resolve) => {
+      document.addEventListener('DOMContentLoaded', () => resolve(), { once: true });
+    });
+  }
+
   console.log('[Chatsworthy] content script active');
   startObserving();
   scheduleEnsure(); // initial render
