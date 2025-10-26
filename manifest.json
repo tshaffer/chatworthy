@@ -32,14 +32,5 @@
       ],
       "run_at": "document_idle"
     }
-  ],
-  "commands": {
-    "export-chat": {
-      "description": "Export current chat (Markdown)",
-      "suggested_key": {
-        "default": "Ctrl+Shift+E",
-        "mac": "Command+Shift+E"
-      }
-    }
-  }
+  ]
 }
