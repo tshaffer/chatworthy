@@ -1,5 +1,3 @@
-import 'chrome-types';
-
 console.log('[Chatworthy] background worker boot');
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Chatworthy] onInstalled');
