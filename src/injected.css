@@ -1,17 +1,63 @@
-
 #chatworthy-ui {
-  position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
-  display: inline-flex; gap: 8px; align-items: center;
-  padding: 6px 8px; border-radius: 10px;
-  border: 1px solid rgba(0,0,0,0.15);
-  background: rgba(255,255,255,0.9); backdrop-filter: blur(6px);
-  box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(360px, 40vw);
+  max-height: 40vh;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
   font-size: 12px;
+  /* compact */
 }
-#chatworthy-format { font-size: 12px; padding: 2px 6px; }
+
+#chatworthy-list {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+label.chatworthy-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+label.chatworthy-item input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.chatworthy-item-text {
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+#chatworthy-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+#chatworthy-controls button,
 #chatworthy-export-btn {
-  font-size: 12px; padding: 6px 8px; border-radius: 8px;
-  border: 1px solid rgba(0,0,0,0.2); background: rgba(255,255,255,0.95);
-  cursor: pointer; font-weight: 600;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: rgba(255, 255, 255, 0.95);
+  cursor: pointer;
+  font-weight: 600;
 }
-#chatworthy-export-btn:hover { filter: brightness(0.96); }
+
+#chatworthy-controls button:hover,
+#chatworthy-export-btn:hover {
+  filter: brightness(0.96);
+}
