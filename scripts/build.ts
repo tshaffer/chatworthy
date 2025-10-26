@@ -1,4 +1,3 @@
-
 import * as esbuild from 'esbuild';
 import { cp, mkdir } from 'node:fs/promises';
 

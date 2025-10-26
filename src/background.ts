@@ -1,2 +1,1 @@
-
-console.log('[Chatworthy] background worker boot');
+console.log('[Chatworthy] background worker active');

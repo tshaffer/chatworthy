@@ -1,14 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Chatworthy (Dev)",
-  "version": "0.2.0",
-  "description": "Dev-only exporter for ChatGPT chats (Markdown / JSON) with a floating format selector.",
+  "version": "0.3.1",
+  "description": "Select prompts to export to Markdown + YAML front matter.",
   "permissions": [
     "activeTab",
     "scripting",
     "downloads",
-    "storage",
-    "clipboardWrite"
+    "storage"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",

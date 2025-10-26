@@ -1,4 +1,3 @@
-
 {
   "compilerOptions": {
     "target": "ES2021",
@@ -7,8 +6,16 @@
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
-    "types": ["chrome"],
-    "lib": ["ES2021", "DOM"]
+    "types": [
+      "chrome"
+    ],
+    "lib": [
+      "ES2021",
+      "DOM"
+    ]
   },
-  "include": ["src/**/*", "scripts/**/*"]
+  "include": [
+    "src/**/*",
+    "scripts/**/*"
+  ]
 }
