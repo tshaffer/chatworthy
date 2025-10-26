@@ -7,13 +7,11 @@ const isWatch = process.argv.includes('--watch');
 async function copyStatic() {
   await mkdir('dist', { recursive: true });
   await cp('manifest.json', 'dist/manifest.json');
-  await cp('src/popup.html', 'dist/popup.html');
-  await cp('options.html', 'dist/options.html').catch(() => {});
   await cp('src/injected.css', 'dist/injected.css').catch(() => {});
 }
 
 const buildOptions: esbuild.BuildOptions = {
-  entryPoints: ['src/content.ts','src/background.ts','src/popup.ts','src/utils/exporters.ts'],
+  entryPoints: ['src/content.ts','src/background.ts','src/utils/exporters.ts'],
   outdir: 'dist',
   bundle: true,
   format: 'esm',

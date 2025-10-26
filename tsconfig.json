@@ -1,3 +1,4 @@
+
 {
   "compilerOptions": {
     "target": "ES2021",
@@ -7,7 +8,7 @@
     "strict": true,
     "skipLibCheck": true,
     "types": ["chrome"],
-    "lib": ["ES2021", "DOM"]   // DOM is helpful for content/popup code
+    "lib": ["ES2021", "DOM"]
   },
   "include": ["src/**/*", "scripts/**/*"]
 }

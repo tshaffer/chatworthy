@@ -1,9 +1,6 @@
-console.log('[Chatworthy] background worker boot');
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('[Chatworthy] onInstalled');
-});
 
-chrome.commands.onCommand.addListener(async (command: any) => {
+console.log('[Chatworthy] background worker boot');
+chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'export-chat') {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) return;

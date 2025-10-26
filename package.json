@@ -1,6 +1,7 @@
+
 {
   "name": "chatworthy",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,8 +10,8 @@
     "clean": "rm -rf dist && mkdir -p dist"
   },
   "devDependencies": {
-    "chrome-types": "^0.1.384",
     "esbuild": "^0.24.0",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "chrome-types": "^0.1.260"
   }
 }

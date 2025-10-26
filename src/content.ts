@@ -2,9 +2,6 @@
 import type { ChatTurn, ConversationExport } from './types';
 import { toMarkdown } from './utils/exporters';
 
-// Content script sentinel
-console.log('[Chatworthy] content script loaded, version 0.1.1');
-
 function getTitle(): string {
   const h1 = document.querySelector('h1, header h1, [data-testid="conversation-title"]');
   const title = (h1?.textContent || document.title || 'ChatGPT Conversation').trim();
@@ -53,26 +50,35 @@ function filenameBase(): string {
   return `${t || 'chat'}-${stamp}`;
 }
 
-function ensureFloatingButton() {
-  if (document.getElementById('chatworthy-export-btn')) return;
-  const btn = document.createElement('button');
-  btn.id = 'chatworthy-export-btn'; btn.textContent = 'Export (MD)';
-  btn.title = 'Chatworthy export — click to download Markdown (Shift+Click for JSON)';
-  btn.addEventListener('click', (e) => {
+function ensureFloatingUI() {
+  if (document.getElementById('chatworthy-ui')) return;
+  const wrap = document.createElement('div'); wrap.id = 'chatworthy-ui';
+  const select = document.createElement('select'); select.id = 'chatworthy-format'; select.title = 'Choose export format';
+  const optMd = document.createElement('option'); optMd.value = 'md'; optMd.textContent = 'Markdown (.md)';
+  const optJson = document.createElement('option'); optJson.value = 'json'; optJson.textContent = 'JSON (.json)';
+  select.appendChild(optMd); select.appendChild(optJson);
+  const saved = localStorage.getItem('chatworthy.format'); if (saved === 'json') select.value = 'json';
+  select.addEventListener('change', () => localStorage.setItem('chatworthy.format', select.value));
+
+  const btn = document.createElement('button'); btn.id = 'chatworthy-export-btn'; btn.textContent = 'Export'; btn.title = 'Export current chat';
+  btn.addEventListener('click', () => {
     const data = buildExport(); const base = filenameBase();
-    if ((e as MouseEvent).shiftKey) {
+    const format = (document.getElementById('chatworthy-format') as HTMLSelectElement)?.value || 'md';
+    if (format === 'json') {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); download(`${base}.json`, blob);
     } else {
       const md = toMarkdown(data); const blob = new Blob([md], { type: 'text/markdown' }); download(`${base}.md`, blob);
     }
   });
-  document.documentElement.appendChild(btn);
+
+  wrap.appendChild(select); wrap.appendChild(btn); document.documentElement.appendChild(wrap);
 }
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === 'CHATWORTHY_EXPORT') {
     const data = buildExport(); const base = filenameBase();
-    if (msg.format === 'json') {
+    const format = msg.format || (localStorage.getItem('chatworthy.format') || 'md');
+    if (format === 'json') {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); download(`${base}.json`, blob);
     } else {
       const md = toMarkdown(data); const blob = new Blob([md], { type: 'text/markdown' }); download(`${base}.md`, blob);
@@ -80,6 +86,6 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 });
 
-ensureFloatingButton();
-const obs = new MutationObserver(() => ensureFloatingButton());
+ensureFloatingUI();
+const obs = new MutationObserver(() => ensureFloatingUI());
 obs.observe(document.documentElement, { childList: true, subtree: true });

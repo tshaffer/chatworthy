@@ -21,4 +21,3 @@ export function toMarkdown(data: ConversationExport): string {
   });
   return lines.join('\n');
 }
-export function toJson(data: ConversationExport): string { return JSON.stringify(data, null, 2); }

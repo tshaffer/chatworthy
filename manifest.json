@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Chatworthy (Dev)",
-  "version": "0.1.1",
-  "description": "Dev-only exporter for ChatGPT chats (Markdown / JSON).",
+  "version": "0.2.0",
+  "description": "Dev-only exporter for ChatGPT chats (Markdown / JSON) with a floating format selector.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -17,10 +17,6 @@
   "background": {
     "service_worker": "background.js",
     "type": "module"
-  },
-  "action": {
-    "default_title": "Chatworthy",
-    "default_popup": "popup.html"
   },
   "content_scripts": [
     {
@@ -45,6 +41,5 @@
         "mac": "Command+Shift+E"
       }
     }
-  },
-  "options_page": "options.html"
+  }
 }
