@@ -20,7 +20,7 @@ function toYAML(meta: ExportNoteMetadata): string {
   lines.push(`topic: ${yamlEscape(meta.topic ?? '')}`);
 
   lines.push(`summary: ${meta.summary === null ? 'null' : yamlEscape(meta.summary)}`);
-  lines.push(`tags: [${meta.tags.map(t => yamlEscape(t)).join(', ')}]`);
+  lines.push(`tags: [${(meta.tags ?? []).map(t => yamlEscape(t)).join(', ')}]`);
   lines.push(`autoGenerate:`);
   lines.push(`  summary: ${meta.autoGenerate.summary}`);
   lines.push(`  tags: ${meta.autoGenerate.tags}`);

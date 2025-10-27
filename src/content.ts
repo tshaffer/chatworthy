@@ -1,7 +1,7 @@
 // Mark as a module (good for TS/isolatedModules)
-export {};
+export { };
 
-import type { ChatTurn, ConversationExport, ExportNoteMetadata, ExportTurn } from './types';
+import type { ExportNoteMetadata, ExportTurn } from './types';
 import { toMarkdownWithFrontMatter } from './utils/exporters';
 
 /**
@@ -40,7 +40,7 @@ const OBSERVER_THROTTLE_MS = 200;
       console.warn('[Chatsworthy] Disabled by kill switch');
       return;
     }
-  } catch {}
+  } catch { }
 
   // Singleton guard
   if (w.__chatsworthy_init__) return;
@@ -146,44 +146,47 @@ function ensureFloatingUI() {
       // Wire up control handlers (stable references)
       btnAll.onclick = () => root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(cb => (cb.checked = true));
       btnNone.onclick = () => root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(cb => (cb.checked = false));
+
       exportBtn.onclick = () => {
-        const data = buildExport();
-        const sel: number[] = [];
-        root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(cb => {
-          if (cb.checked) sel.push(parseInt(cb.dataset.uindex || '0', 10));
-        });
-        const md = toMarkdownWithFrontMatter(data, sel);
-        const blob = new Blob([md], { type: 'text/markdown' });
-        download(`${filenameBase()}.md`, blob);
+        // Minimal: export the full conversation in the new Chatalog-ready format.
+        // If you later want subject/topic/notes, pass them here.
+        downloadExport();
       };
-    }
 
-    // Update list efficiently
-    const data = buildExport();
-    const promptIndexes: number[] = [];
-    data.turns.forEach((t, i) => {
-      if (t.role === 'user') promptIndexes.push(i);
-    });
+      // Update list efficiently
+      // const data = buildExport();
+      // const promptIndexes: number[] = [];
+      // data.turns.forEach((t, i) => {
+      //   if (t.role === 'user') promptIndexes.push(i);
+      // });
+      // Populate the list from extracted turns (UI is optional; export ignores selection).
+      const turns = extractTurns();
+      const promptIndexes: number[] = [];
+      turns.forEach((t, i) => {
+        if (t.role === 'user') promptIndexes.push(i);
+      });
 
-    const listEl = document.getElementById(LIST_ID)!;
+      const listEl = document.getElementById(LIST_ID)!;
 
-    // Clear & rebuild items (cheap DOM, but done while observer is suspended)
-    listEl.innerHTML = '';
-    for (const uIdx of promptIndexes) {
-      const item = document.createElement('label');
-      item.className = 'chatworthy-item';
+      // Clear & rebuild items (cheap DOM, but done while observer is suspended)
+      listEl.innerHTML = '';
+      for (const uIdx of promptIndexes) {
+        const item = document.createElement('label');
+        item.className = 'chatworthy-item';
 
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.dataset.uindex = String(uIdx);
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.uindex = String(uIdx);
 
-      const span = document.createElement('span');
-      span.className = 'chatworthy-item-text';
-      span.textContent = summarizePromptText(data.turns[uIdx].html || data.turns[uIdx].text || '');
+        const span = document.createElement('span');
+        span.className = 'chatworthy-item-text';
+        // span.textContent = summarizePromptText(data.turns[uIdx].html || data.turns[uIdx].text || '');
+        span.textContent = summarizePromptText((turns[uIdx] as any).text || '');
 
-      item.appendChild(cb);
-      item.appendChild(span);
-      listEl.appendChild(item);
+        item.appendChild(cb);
+        item.appendChild(span);
+        listEl.appendChild(item);
+      }
     }
   } finally {
     suspendObservers(false);
@@ -251,7 +254,7 @@ function startObserving() {
   if (!mo) mo = makeObserver();
 
   // Defensive: disconnect before re-observe (in case of re-init)
-  try { mo.disconnect(); } catch {}
+  try { mo.disconnect(); } catch { }
 
   mo.observe(target, {
     childList: true,
