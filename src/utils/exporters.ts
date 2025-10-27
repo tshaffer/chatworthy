@@ -1,50 +1,62 @@
-import type { ConversationExport } from '../types';
+import { ExportNoteMetadata, ExportTurn } from '../types';
 
-function escapeYaml(str: string) { return String(str).replace(/"/g, '\"'); }
-function escapeMd(s: string) { return s.replace(/[<>]/g, c => (c === '<' ? '&lt;' : '&gt;')); }
+function yamlEscape(val: string) {
+  // Keep simple: wrap in double quotes & escape inner quotes/newlines
+  return `"${val.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+}
 
-export function toMarkdownWithFrontMatter(data: ConversationExport, selectedPromptIndexes: number[]): string {
-  const fmLines: string[] = [];
-  fmLines.push('---');
-  fmLines.push(`title: "${escapeYaml(data.title || 'Chat Export')}"`);
-  fmLines.push(`url: "${escapeYaml(data.url)}"`);
-  fmLines.push(`exportedAt: "${escapeYaml(data.exportedAt)}"`);
-  fmLines.push(`selectionCount: ${selectedPromptIndexes.length}`);
-  fmLines.push('selectedPrompts:');
-  selectedPromptIndexes.forEach(i => fmLines.push(`  - ${i}`));
-  fmLines.push('---');
+function toYAML(meta: ExportNoteMetadata): string {
+  const lines: string[] = [];
+  lines.push('---');
+  lines.push(`noteId: ${yamlEscape(meta.noteId)}`);
+  lines.push(`source: ${yamlEscape(meta.source)}`);
+  if (meta.chatId) lines.push(`chatId: ${yamlEscape(meta.chatId)}`);
+  if (meta.chatTitle) lines.push(`chatTitle: ${yamlEscape(meta.chatTitle)}`);
+  lines.push(`pageUrl: ${yamlEscape(meta.pageUrl)}`);
+  lines.push(`exportedAt: ${yamlEscape(meta.exportedAt)}`);
+  if (meta.model) lines.push(`model: ${yamlEscape(meta.model)}`);
 
-  const body: string[] = [];
-  body.push(`# ${escapeMd(data.title || 'Chat Export')}`);
-  body.push(`_Source_: ${data.url}`);
-  body.push(`_Exported_: ${new Date(data.exportedAt).toLocaleString()}`);
-  body.push('');
+  lines.push(`subject: ${yamlEscape(meta.subject ?? '')}`);
+  lines.push(`topic: ${yamlEscape(meta.topic ?? '')}`);
 
-  selectedPromptIndexes.forEach((uIdx, selIdx) => {
-    const user = data.turns[uIdx];
-    if (!user) return;
-    body.push('---');
-    body.push(`## Prompt ${selIdx + 1}`);
-    const userMd = (user.html || user.text || '')
-      .replaceAll('<br>', '\n')
-      .replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/g, (_m, code) => `\n\n\n\`\`\`\n${code}\n\`\`\`\n\n`)
-      .replace(/<code>([\s\S]*?)<\/code>/g, '`$1`')
-      .replace(/<\/(p|div|li)>/g, '\n')
-      .replace(/<[^>]+>/g, '').trim();
-    body.push(userMd); body.push('');
+  lines.push(`summary: ${meta.summary === null ? 'null' : yamlEscape(meta.summary)}`);
+  lines.push(`tags: [${meta.tags.map(t => yamlEscape(t)).join(', ')}]`);
+  lines.push(`autoGenerate:`);
+  lines.push(`  summary: ${meta.autoGenerate.summary}`);
+  lines.push(`  tags: ${meta.autoGenerate.tags}`);
 
-    const assistant = data.turns.slice(uIdx + 1).find(t => t.role === 'assistant');
-    if (assistant) {
-      body.push('### Assistant');
-      const aMd = (assistant.html || assistant.text || '')
-        .replaceAll('<br>', '\n')
-        .replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/g, (_m, code) => `\n\n\n\`\`\`\n${code}\n\`\`\`\n\n`)
-        .replace(/<code>([\s\S]*?)<\/code>/g, '`$1`')
-        .replace(/<\/(p|div|li)>/g, '\n')
-        .replace(/<[^>]+>/g, '').trim();
-      body.push(aMd); body.push('');
-    }
-  });
+  lines.push(`noteMode: ${yamlEscape(meta.noteMode)}`);
+  lines.push(`turnCount: ${meta.turnCount}`);
+  lines.push(`splitHints: [${meta.splitHints.map(pair => `[${pair[0]}, ${pair[1]}]`).join(', ')}]`);
 
-  return fmLines.join('\n') + '\n\n' + body.join('\n');
+  if (meta.author) lines.push(`author: ${yamlEscape(meta.author)}`);
+  if (meta.visibility) lines.push(`visibility: ${yamlEscape(meta.visibility)}`);
+  lines.push('---');
+  return lines.join('\n');
+}
+
+export function toMarkdownWithFrontMatter(
+  meta: ExportNoteMetadata,
+  turns: ExportTurn[],
+  freeformNotes?: string
+): string {
+  const frontMatter = toYAML(meta);
+
+  const turnsBlock = [
+    ':::turns',
+    ...turns.map(t => {
+      const r = `- role: ${t.role}`;
+      const time = t.time ? `\n  time: "${t.time}"` : '';
+      // Ensure text is single-line safe YAML-like; importer will handle \n
+      const text = `\n  text: "${t.text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+      return r + time + text;
+    }),
+    ':::end-turns',
+  ].join('\n');
+
+  const notesSection = freeformNotes?.trim()
+    ? `\n\n## Notes\n${freeformNotes.trim()}\n`
+    : '\n';
+
+  return `${frontMatter}\n\n# Transcript\n\n${turnsBlock}${notesSection}`;
 }

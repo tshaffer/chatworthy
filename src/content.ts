@@ -1,7 +1,7 @@
 // Mark as a module (good for TS/isolatedModules)
 export {};
 
-import type { ChatTurn, ConversationExport } from './types';
+import type { ChatTurn, ConversationExport, ExportNoteMetadata, ExportTurn } from './types';
 import { toMarkdownWithFrontMatter } from './utils/exporters';
 
 /**
@@ -59,57 +59,6 @@ function getTitle(): string {
   const h1 = document.querySelector('h1, header h1, [data-testid="conversation-title"]');
   const title = (h1?.textContent || document.title || 'ChatGPT Conversation').trim();
   return title.replace(/[\n\r]+/g, ' ');
-}
-
-function extractTurns(): ChatTurn[] {
-  const turns: ChatTurn[] = [];
-
-  const nodes = Array.from(
-    document.querySelectorAll(
-      '[data-message-author-role], article[data-testid^="conversation-turn"], [data-testid^="conversation-turn"]'
-    )
-  ) as HTMLElement[];
-
-  const roleFromEl = (el: HTMLElement): ChatTurn['role'] => {
-    const r = el.getAttribute('data-message-author-role');
-    if (r === 'assistant' || r === 'user' || r === 'system' || r === 'tool') return r as any;
-    const txt = el.textContent?.toLowerCase() || '';
-    if (txt.includes('assistant')) return 'assistant';
-    if (txt.includes('user')) return 'user';
-    return 'assistant';
-  };
-
-  nodes.forEach(el => {
-    const content =
-      (el.querySelector('[data-message-content], .markdown.prose, .prose, [data-testid="assistant-response"]') as HTMLElement) ||
-      el;
-    const html = content.innerHTML || '';
-    const text = content.innerText || content.textContent || '';
-    const role = roleFromEl(el);
-    if (!html.trim() && (role === 'system' || role === 'tool')) return;
-    turns.push({ role, html, text });
-  });
-
-  // Deduplicate adjacent-ish repeats
-  const uniq: ChatTurn[] = [];
-  const seen = new Set<string>();
-  for (const t of turns) {
-    const key = t.role + '|' + (t.text || '').slice(0, 80);
-    if (!seen.has(key)) {
-      seen.add(key);
-      uniq.push(t);
-    }
-  }
-  return uniq;
-}
-
-function buildExport(): ConversationExport {
-  return {
-    title: getTitle(),
-    url: location.href,
-    exportedAt: new Date().toISOString(),
-    turns: extractTurns(),
-  };
 }
 
 function download(filename: string, blob: Blob) {
@@ -351,4 +300,96 @@ async function init() {
   console.log('[Chatsworthy] content script active');
   startObserving();
   scheduleEnsure(); // initial render
+}
+
+
+/**
+ * Utility: safe UUID
+ */
+function generateNoteId(): string {
+  try {
+    return `ext-${crypto.randomUUID()}`;
+  } catch {
+    return `ext-${Math.random().toString(36).slice(2)}${Date.now()}`;
+  }
+}
+
+/**
+ * Utility: extract chat ID from the current ChatGPT URL.
+ * Works for both chat.openai.com/c/<id> and chatgpt.com/c/<id>.
+ */
+function getChatIdFromUrl(href: string): string | undefined {
+  const match = href.match(/\/c\/([a-zA-Z0-9_-]+)/);
+  return match?.[1];
+}
+
+/**
+ * Utility: scrape visible message turns on the page.
+ * Assumes ChatGPT DOM elements have [data-message-author-role].
+ */
+function extractTurns(): ExportTurn[] {
+  const nodes = document.querySelectorAll('[data-message-author-role]');
+  const turns: ExportTurn[] = [];
+
+  nodes.forEach((el) => {
+    const role = (el.getAttribute('data-message-author-role') as 'user' | 'assistant') ?? 'assistant';
+    const text = (el.textContent ?? '').trim();
+    if (text) {
+      turns.push({ role, text });
+    }
+  });
+
+  return turns;
+}
+
+/**
+ * ✅ New export builder — replaces old ConversationExport.
+ * Builds full metadata and markdown content for Chatalog ingestion.
+ */
+function buildExport(subject = '', topic = '', notes = ''): string {
+  const turns = extractTurns();
+
+  const meta: ExportNoteMetadata = {
+    noteId: generateNoteId(),
+    source: 'chatgpt',
+    chatId: getChatIdFromUrl(location.href),
+    chatTitle: document.title,
+    pageUrl: location.href,
+    exportedAt: new Date().toISOString(),
+    model: undefined, // optional, could be scraped if visible
+
+    subject,
+    topic,
+
+    summary: null,
+    tags: [],
+    autoGenerate: { summary: true, tags: true },
+
+    noteMode: 'auto',
+    turnCount: turns.length,
+    splitHints: [],
+
+    author: 'me',
+    visibility: 'private',
+  };
+
+  // Build Markdown text with YAML front matter
+  const markdown = toMarkdownWithFrontMatter(meta, turns, notes);
+  return markdown;
+}
+
+/**
+ * Example trigger: build and download a Markdown export
+ */
+function downloadExport(subject = '', topic = '', notes = '') {
+  const markdown = buildExport(subject, topic, notes);
+  const fileName = `${document.title.replace(/[^\w\-]+/g, '_').slice(0, 80)}.md`;
+  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  chrome.downloads.download({
+    url,
+    filename: fileName,
+    saveAs: true,
+  });
 }
