@@ -1,7 +1,7 @@
 // Mark as a module (good for TS/isolatedModules)
 export { };
 
-import type { ExportNoteMetadata, ExportTurn } from './types';
+import type { ConversationExport, ExportNoteMetadata, ExportTurn } from './types';
 import { toMarkdownWithFrontMatter } from './utils/exporters';
 
 /**
@@ -152,17 +152,20 @@ function buildExport(subject = '', topic = '', notes = ''): string {
 /**
  * Downloads the built markdown file
  */
-function downloadExport(subject = '', topic = '', notes = '') {
-  const markdown = buildExport(subject, topic, notes);
-  const fileName = `${filenameBase()}.md`;
-  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+export function downloadExport(filename: string, data: string | Blob) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
 
-  chrome.downloads.download({
-    url,
-    filename: fileName,
-    saveAs: true,
-  });
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  // Give the download a moment to start before revoking
+  setTimeout(() => URL.revokeObjectURL(url), 500);
 }
 
 // ---- Floating UI -------------------------------------------
@@ -331,3 +334,4 @@ async function init() {
   startObserving();
   scheduleEnsure();
 }
+
