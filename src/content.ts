@@ -1,5 +1,4 @@
 // Mark as a module (good for TS/isolatedModules)
-export { };
 
 import type { ExportNoteMetadata, ExportTurn } from './types';
 import { toMarkdownWithFrontMatter } from './utils/exporters';
@@ -152,7 +151,7 @@ function buildExport(subject = '', topic = '', notes = ''): string {
 /**
  * Downloads the built markdown file
  */
-export function downloadExport(filename: string, data: string | Blob) {
+function downloadExport(filename: string, data: string | Blob) {
   const blob = data instanceof Blob ? data : new Blob([data], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
 
@@ -339,4 +338,3 @@ async function init() {
   startObserving();
   scheduleEnsure();
 }
-
