@@ -1,7 +1,7 @@
 // Mark as a module (good for TS/isolatedModules)
 export { };
 
-import type { ConversationExport, ExportNoteMetadata, ExportTurn } from './types';
+import type { ExportNoteMetadata, ExportTurn } from './types';
 import { toMarkdownWithFrontMatter } from './utils/exporters';
 
 /**
@@ -219,8 +219,13 @@ function ensureFloatingUI() {
         root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(cb => (cb.checked = false));
 
       exportBtn.onclick = () => {
-        // Single-click export — full conversation
-        downloadExport();
+        try {
+          const md = buildExport();                  // builds meta + turns -> markdown
+          downloadExport(`${filenameBase()}.md`, md); // pass filename + content
+        } catch (err) {
+          console.error('[Chatsworthy] export failed:', err);
+          alert('Export failed — see console for details.');
+        }
       };
     }
 
