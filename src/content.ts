@@ -6,7 +6,7 @@ import { toMarkdownWithFrontMatter } from './utils/exporters';
 /**
  * ------------------------------------------------------------
  *  Chatsworthy Content Script (v2 — Chatalog-ready)
- *  - Floating “Export” UI
+ *  - Floating “Export” UI (collapsible)
  *  - Robust observer for new messages
  *  - New buildExport + downloadExport (YAML front matter + transcript)
  * ------------------------------------------------------------
@@ -18,8 +18,10 @@ const ROOT_ID = 'chatsworthy-root';
 const LIST_ID = 'chatworthy-list';
 const CONTROLS_ID = 'chatworthy-controls';
 const EXPORT_BTN_ID = 'chatworthy-export-btn';
+const TOGGLE_BTN_ID = 'chatworthy-toggle-btn';
 
 const OBSERVER_THROTTLE_MS = 200;
+const COLLAPSE_LS_KEY = 'chatsworthy:collapsed';
 
 // ---- Singleton + Killswitch -------------------------------
 
@@ -35,7 +37,7 @@ const OBSERVER_THROTTLE_MS = 200;
       console.warn('[Chatsworthy] Disabled by kill switch');
       return;
     }
-  } catch { }
+  } catch { /* ignore */ }
 
   // Singleton guard
   if (w.__chatsworthy_init__) return;
@@ -121,29 +123,29 @@ function extractTurns(): ExportTurn[] {
 function buildExport(subject = '', topic = '', notes = ''): string {
   const turns = extractTurns();
 
-  const meta: ExportNoteMetadata = {
-    noteId: generateNoteId(),
-    source: 'chatgpt',
-    chatId: getChatIdFromUrl(location.href),
-    chatTitle: document.title,
-    pageUrl: location.href,
-    exportedAt: new Date().toISOString(),
-    model: undefined, // optional, could be scraped if visible
+const meta = {
+  noteId: generateNoteId(),
+  source: 'chatgpt',
+  chatId: getChatIdFromUrl(location.href),
+  chatTitle: document.title,
+  pageUrl: location.href,
+  exportedAt: new Date().toISOString(),
+  model: undefined,
 
-    subject,
-    topic,
+  subject,
+  topic,
 
-    summary: null,
-    tags: [],
-    autoGenerate: { summary: true, tags: true },
+  summary: null,
+  tags: [],
+  autoGenerate: { summary: true, tags: true },
 
-    noteMode: 'auto',
-    turnCount: turns.length,
-    splitHints: [],
+  noteMode: 'auto',
+  turnCount: turns.length,
+  splitHints: [],
 
-    author: 'me',
-    visibility: 'private',
-  };
+  author: 'me',
+  visibility: 'private',
+} satisfies ExportNoteMetadata;
 
   return toMarkdownWithFrontMatter(meta, turns, notes);
 }
@@ -167,53 +169,109 @@ function downloadExport(filename: string, data: string | Blob) {
   setTimeout(() => URL.revokeObjectURL(url), 500);
 }
 
+// ---- Collapsed state helpers -------------------------------
+
+function getInitialCollapsed(): boolean {
+  try {
+    const raw = localStorage.getItem(COLLAPSE_LS_KEY);
+    if (raw === '0') return false;
+    if (raw === '1') return true;
+  } catch { /* ignore */ }
+  // Default: collapsed
+  return true;
+}
+
+function setCollapsed(v: boolean) {
+  try { localStorage.setItem(COLLAPSE_LS_KEY, v ? '1' : '0'); } catch { /* ignore */ }
+  const root = document.getElementById(ROOT_ID);
+  const listEl = document.getElementById(LIST_ID) as HTMLDivElement | null;
+  const toggleBtn = document.getElementById(TOGGLE_BTN_ID) as HTMLButtonElement | null;
+
+  if (root) root.setAttribute('data-collapsed', v ? '1' : '0');
+  if (listEl) listEl.style.display = v ? 'none' : 'block';
+  if (toggleBtn) toggleBtn.textContent = v ? 'Show List' : 'Hide List';
+}
+
 // ---- Floating UI -------------------------------------------
 
 function ensureFloatingUI() {
   suspendObservers(true);
   try {
     // Create root once
-    let root = document.getElementById(ROOT_ID);
+    let root = document.getElementById(ROOT_ID) as HTMLDivElement | null;
     if (!root) {
       root = document.createElement('div');
       root.id = ROOT_ID;
+
+      // Layout & position: upper-right, offset from top by 80px; list grows downward under controls
       root.style.position = 'fixed';
       root.style.right = '16px';
-      root.style.bottom = '16px';
+      root.style.top = '80px';
       root.style.zIndex = '2147483647';
-      root.style.background = 'rgba(255,255,255,0.9)';
+      root.style.background = 'rgba(255,255,255,0.95)';
       root.style.padding = '8px';
       root.style.borderRadius = '8px';
-      root.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
+      root.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+      root.style.display = 'flex';
+      root.style.flexDirection = 'column';
+      root.style.gap = '8px';
+      root.style.maxWidth = '340px';
 
       (document.body || document.documentElement).appendChild(root);
 
-      const list = document.createElement('div');
-      list.id = LIST_ID;
-
+      // Controls (row)
       const controls = document.createElement('div');
       controls.id = CONTROLS_ID;
+      controls.style.display = 'flex';
+      controls.style.alignItems = 'center';
+      controls.style.gap = '6px';
+      controls.style.flexWrap = 'wrap';
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.id = TOGGLE_BTN_ID;
+      toggleBtn.type = 'button';
+      toggleBtn.textContent = 'Show List';
+      toggleBtn.style.fontWeight = '600';
 
       const btnAll = document.createElement('button');
+      btnAll.type = 'button';
       btnAll.textContent = 'All';
 
       const btnNone = document.createElement('button');
+      btnNone.type = 'button';
       btnNone.textContent = 'None';
 
       const exportBtn = document.createElement('button');
       exportBtn.id = EXPORT_BTN_ID;
+      exportBtn.type = 'button';
       exportBtn.textContent = 'Export';
 
+      controls.appendChild(toggleBtn);
       controls.appendChild(btnAll);
       controls.appendChild(btnNone);
       controls.appendChild(exportBtn);
 
-      root.appendChild(list);
+      // List (below controls; grows downward)
+      const list = document.createElement('div');
+      list.id = LIST_ID;
+      list.style.display = 'none';               // collapsed by default
+      list.style.overflow = 'auto';
+      list.style.maxHeight = '50vh';
+      list.style.minWidth = '220px';
+
+      // Add into root in order: controls, then list
       root.appendChild(controls);
+      root.appendChild(list);
 
       // Wire up controls
+      toggleBtn.onclick = () => {
+        const isCollapsed = root!.getAttribute('data-collapsed') !== '0';
+        setCollapsed(!isCollapsed);
+      };
+
       btnAll.onclick = () =>
         root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(cb => (cb.checked = true));
+
       btnNone.onclick = () =>
         root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(cb => (cb.checked = false));
 
@@ -226,6 +284,9 @@ function ensureFloatingUI() {
           alert('Export failed — see console for details.');
         }
       };
+
+      // Initialize collapsed/expanded state
+      setCollapsed(getInitialCollapsed());
     }
 
     // Update list
@@ -241,7 +302,10 @@ function ensureFloatingUI() {
     for (const uIdx of promptIndexes) {
       const item = document.createElement('label');
       item.className = 'chatworthy-item';
-      item.style.display = 'block';
+      item.style.display = 'flex';
+      item.style.alignItems = 'flex-start';
+      item.style.gap = '6px';
+      item.style.margin = '4px 0';
 
       const cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -250,6 +314,7 @@ function ensureFloatingUI() {
       const span = document.createElement('span');
       span.className = 'chatworthy-item-text';
       span.textContent = summarizePromptText((turns[uIdx] as any).text || '');
+      span.style.lineHeight = '1.2';
 
       item.appendChild(cb);
       item.appendChild(span);
@@ -299,7 +364,7 @@ function startObserving() {
   if (!target) return;
 
   if (!mo) mo = makeObserver();
-  try { mo.disconnect(); } catch { }
+  try { mo.disconnect(); } catch { /* ignore */ }
   mo.observe(target, { childList: true, subtree: true });
 }
 

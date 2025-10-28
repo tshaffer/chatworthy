@@ -1,3 +1,4 @@
+// types.ts
 export type Role = 'user' | 'assistant' | 'system' | 'tool';
 export interface ChatTurn { role: Role; html: string; text: string; }
 export interface ConversationExport { title: string; url: string; exportedAt: string; turns: ChatTurn[]; }
@@ -21,17 +22,15 @@ export interface ExportNoteMetadata {
   subject?: string;
   topic?: string;
 
-  summary: string | null;
-  tags: string[];
-  autoGenerate: {
-    summary: boolean;
-    tags: boolean;
-  };
+  // ↓ new/extended fields so content.ts can assign them without ignores
+  summary?: string | null;
+  tags?: string[];
+  autoGenerate?: { summary: boolean; tags: boolean };
 
-  noteMode: NoteMode;
-  turnCount: number;
-  splitHints: Array<[number, number]>;
+  noteMode?: NoteMode;
+  turnCount?: number;
+  splitHints?: string[];
 
   author?: string;
-  visibility?: 'private' | 'shared';
+  visibility?: 'private' | 'shared' | 'public';
 }
