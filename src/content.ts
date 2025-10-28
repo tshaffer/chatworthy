@@ -123,29 +123,29 @@ function extractTurns(): ExportTurn[] {
 function buildExport(subject = '', topic = '', notes = ''): string {
   const turns = extractTurns();
 
-const meta = {
-  noteId: generateNoteId(),
-  source: 'chatgpt',
-  chatId: getChatIdFromUrl(location.href),
-  chatTitle: document.title,
-  pageUrl: location.href,
-  exportedAt: new Date().toISOString(),
-  model: undefined,
+  const meta = {
+    noteId: generateNoteId(),
+    source: 'chatgpt',
+    chatId: getChatIdFromUrl(location.href),
+    chatTitle: document.title,
+    pageUrl: location.href,
+    exportedAt: new Date().toISOString(),
+    model: undefined,
 
-  subject,
-  topic,
+    subject,
+    topic,
 
-  summary: null,
-  tags: [],
-  autoGenerate: { summary: true, tags: true },
+    summary: null,
+    tags: [],
+    autoGenerate: { summary: true, tags: true },
 
-  noteMode: 'auto',
-  turnCount: turns.length,
-  splitHints: [],
+    noteMode: 'auto',
+    turnCount: turns.length,
+    splitHints: [],
 
-  author: 'me',
-  visibility: 'private',
-} satisfies ExportNoteMetadata;
+    author: 'me',
+    visibility: 'private',
+  } satisfies ExportNoteMetadata;
 
   return toMarkdownWithFrontMatter(meta, turns, notes);
 }
@@ -224,8 +224,10 @@ function ensureFloatingUI() {
       controls.id = CONTROLS_ID;
       controls.style.display = 'flex';
       controls.style.alignItems = 'center';
+      controls.style.justifyContent = 'flex-end'; // 👉 right-justify buttons
       controls.style.gap = '6px';
       controls.style.flexWrap = 'wrap';
+      controls.style.width = '100%';              // ensures it uses full root width
 
       const toggleBtn = document.createElement('button');
       toggleBtn.id = TOGGLE_BTN_ID;
