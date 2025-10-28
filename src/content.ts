@@ -295,6 +295,7 @@ function setCollapsed(v: boolean) {
 // ---- Floating UI -------------------------------------------
 
 function ensureFloatingUI() {
+  ensureStyles();
   suspendObservers(true);
   try {
     // Create root once
@@ -437,10 +438,33 @@ function ensureFloatingUI() {
     }
 
     updateControlsState();
-    
+
   } finally {
     suspendObservers(false);
   }
+}
+
+function ensureStyles() {
+  const STYLE_ID = 'chatsworthy-styles';
+  if (document.getElementById(STYLE_ID)) return;
+
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = `
+    #${ROOT_ID} button {
+      padding: 4px 8px;
+      border: 1px solid rgba(0,0,0,0.2);
+      border-radius: 6px;
+      background: white;
+      font-size: 12px;
+    }
+    #${ROOT_ID} button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      filter: grayscale(100%);
+    }
+  `;
+  (document.head || document.documentElement).appendChild(style);
 }
 
 // ---- Observer + scheduling ---------------------------------
