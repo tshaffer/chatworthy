@@ -363,6 +363,7 @@ function ensureFloatingUI() {
       list.style.overflow = 'auto';
       list.style.maxHeight = '50vh';
       list.style.minWidth = '220px';
+      list.style.padding = '4px 8px 4px 8px'; // gives room for the focus ring on the left
 
       // Add into root in order: controls, then list
       root.appendChild(controls);
