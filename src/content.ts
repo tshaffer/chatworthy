@@ -1,7 +1,7 @@
 // Mark as a module (good for TS/isolatedModules)
 
 import type { ExportNoteMetadata, ExportTurn } from './types';
-// Helper that chooses legacy HTML-flavored MD vs. pure MD
+// Format-aware builder (now supports passing per-turn HTML bodies for Pure MD)
 import { buildMarkdownExportByFormat } from './utils/exporters';
 
 /**
@@ -100,34 +100,64 @@ function getSelectedPromptIndexes(): number[] {
 }
 
 /**
- * Build the exact list of ExportTurn objects to export:
- * For each selected user turn, include the user turn + all following non-user turns
- * until the next user turn (or end of transcript).
+ * Scrape visible message turns on the page and keep a parallel array of elements.
  */
-function buildSelectedTurns(): ExportTurn[] {
-  const all = extractTurns();
-  const selectedUserIdxs = getSelectedPromptIndexes();
-  if (selectedUserIdxs.length === 0) return [];
+function getAllMessageEls(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-message-author-role]'));
+}
 
-  const out: ExportTurn[] = [];
+function extractTurns(): ExportTurn[] {
+  const nodes = getAllMessageEls();
+  const turns: ExportTurn[] = [];
+
+  nodes.forEach((el) => {
+    const role = (el.getAttribute('data-message-author-role') as 'user' | 'assistant' | 'system' | 'tool') ?? 'assistant';
+    const text = (el.textContent ?? '').trim();
+    // We keep text for the legacy exporter; Pure MD will use outerHTML bodies
+    if (text) {
+      turns.push({ role, text });
+    } else {
+      // Still push an empty message to preserve index alignment with DOM list
+      turns.push({ role, text: '' });
+    }
+  });
+
+  return turns;
+}
+
+/**
+ * Compute the selected ranges of turns (user turn + following non-user turns until next user).
+ * Returns both the ExportTurn[] and a DOM outerHTML[] aligned 1:1 with those turns.
+ */
+function buildSelectedPayload(): { turns: ExportTurn[]; htmlBodies: string[] } {
+  const allTurns = extractTurns();
+  const allEls = getAllMessageEls();
+  const selectedUserIdxs = getSelectedPromptIndexes();
+  if (selectedUserIdxs.length === 0) return { turns: [], htmlBodies: [] };
+
+  const turns: ExportTurn[] = [];
+  const htmlBodies: string[] = [];
+
   for (let i = 0; i < selectedUserIdxs.length; i++) {
     const uIdx = selectedUserIdxs[i];
-    const nextU =
-      i + 1 < selectedUserIdxs.length ? selectedUserIdxs[i + 1] : all.length;
+    const nextU = (i + 1 < selectedUserIdxs.length) ? selectedUserIdxs[i + 1] : allTurns.length;
 
-    // Always include the selected user turn itself (guard against bad indexes)
-    if (uIdx >= 0 && uIdx < all.length && all[uIdx].role === 'user') {
-      out.push(all[uIdx]);
+    // include selected user turn
+    if (uIdx >= 0 && uIdx < allTurns.length) {
+      turns.push(allTurns[uIdx]);
+      htmlBodies.push(allEls[uIdx]?.outerHTML ?? '');
     }
 
-    // Include everything after that user turn until (but not including) the next user turn
+    // include everything after that user turn until the next user turn
     for (let j = uIdx + 1; j < nextU; j++) {
-      if (j >= 0 && j < all.length) {
-        out.push(all[j]);
+      if (j >= 0 && j < allTurns.length) {
+        turns.push(allTurns[j]);
+        htmlBodies.push(allEls[j]?.outerHTML ?? '');
       }
     }
   }
-  return out;
+
+  return { turns, htmlBodies };
 }
 
 function getSelectionStats(): { total: number; selected: number } {
@@ -175,24 +205,6 @@ function getChatIdFromUrl(href: string): string | undefined {
   return match?.[1];
 }
 
-/**
- * Utility: scrape visible message turns on the page.
- */
-function extractTurns(): ExportTurn[] {
-  const nodes = document.querySelectorAll('[data-message-author-role]');
-  const turns: ExportTurn[] = [];
-
-  nodes.forEach((el) => {
-    const role = (el.getAttribute('data-message-author-role') as 'user' | 'assistant') ?? 'assistant';
-    const text = (el.textContent ?? '').trim();
-    if (text) {
-      turns.push({ role, text });
-    }
-  });
-
-  return turns;
-}
-
 // ---- Export Format State -----------------------------------
 
 function getInitialExportFormat(): ExportFormat {
@@ -214,7 +226,8 @@ function buildExportFromTurns(
   turns: ExportTurn[],
   subject = '',
   topic = '',
-  notes = ''
+  notes = '',
+  htmlBodies?: string[] // 1:1 with turns (only used for Pure MD)
 ): string {
   const meta = {
     noteId: generateNoteId(),
@@ -233,19 +246,23 @@ function buildExportFromTurns(
     autoGenerate: { summary: true, tags: true },
 
     noteMode: 'auto',
-    turnCount: turns.length,   // ✅ reflect the filtered export, not the full page
+    turnCount: turns.length,   // reflect filtered export, not full page
     splitHints: [],
 
     author: 'me',
     visibility: 'private',
   } satisfies ExportNoteMetadata;
 
-  // Use the format-aware builder; pass freeform notes as a string (legacy compat)
   return buildMarkdownExportByFormat(
     exportFormat,
     meta,
     turns,
-    { title: meta.chatTitle, freeformNotes: notes }
+    {
+      title: meta.chatTitle,
+      freeformNotes: notes,
+      includeFrontMatter: true,
+      htmlBodies // used by Pure MD path
+    }
   );
 }
 
@@ -264,7 +281,6 @@ function downloadExport(filename: string, data: string | Blob) {
   a.click();
   a.remove();
 
-  // Give the download a moment to start before revoking
   setTimeout(() => URL.revokeObjectURL(url), 500);
 }
 
@@ -303,7 +319,7 @@ function ensureFloatingUI() {
       root = document.createElement('div');
       root.id = ROOT_ID;
 
-      // Layout & position: upper-right, offset from top by 80px; list grows downward under controls
+      // Layout & position
       root.style.position = 'fixed';
       root.style.right = '16px';
       root.style.top = '80px';
@@ -324,10 +340,10 @@ function ensureFloatingUI() {
       controls.id = CONTROLS_ID;
       controls.style.display = 'flex';
       controls.style.alignItems = 'center';
-      controls.style.justifyContent = 'flex-end'; // 👉 right-justify buttons
+      controls.style.justifyContent = 'flex-end'; // right-justify buttons
       controls.style.gap = '6px';
-      controls.style.flexWrap = 'nowrap';         // 👉 single line
-      controls.style.width = '100%';              // ensures full root width
+      controls.style.flexWrap = 'nowrap';         // single line
+      controls.style.width = '100%';
 
       const toggleBtn = document.createElement('button');
       toggleBtn.id = TOGGLE_BTN_ID;
@@ -347,7 +363,7 @@ function ensureFloatingUI() {
 
       // Pure Markdown checkbox (persists via localStorage)
       const pureLabel = document.createElement('label');
-      pureLabel.className = 'chatworthy-toggle';        // styled in ensureStyles()
+      pureLabel.className = 'chatworthy-toggle';
       pureLabel.htmlFor = PURE_MD_CHECKBOX_ID;
 
       const pureCb = document.createElement('input');
@@ -375,16 +391,15 @@ function ensureFloatingUI() {
       controls.appendChild(pureLabel);
       controls.appendChild(exportBtn);
 
-      // List (below controls; grows downward)
+      // List (below controls)
       const list = document.createElement('div');
       list.id = LIST_ID;
       list.style.display = 'none';               // collapsed by default
       list.style.overflow = 'auto';
       list.style.maxHeight = '50vh';
       list.style.minWidth = '220px';
-      list.style.padding = '4px 8px 4px 8px'; // gives room for the focus ring on the left
+      list.style.padding = '4px 8px 4px 8px'; // room for focus ring on the left
 
-      // Add into root in order: controls, then list
       root.appendChild(controls);
       root.appendChild(list);
 
@@ -406,13 +421,12 @@ function ensureFloatingUI() {
 
       exportBtn.onclick = () => {
         try {
-          const filtered = buildSelectedTurns();
-          if (filtered.length === 0) {
-            // Button should already be disabled, but keep this guard:
+          const { turns, htmlBodies } = buildSelectedPayload();
+          if (turns.length === 0) {
             alert('Select at least one prompt to export.');
             return;
           }
-          const md = buildExportFromTurns(filtered);
+          const md = buildExportFromTurns(turns, '', '', '', htmlBodies);
           downloadExport(`${filenameBase()}.md`, md);
         } catch (err) {
           console.error('[Chatsworthy] export failed:', err);
@@ -489,8 +503,8 @@ function ensureStyles() {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-size: 12px;      /* match button font-size */
-      font-weight: 600;     /* match "Show List" emphasis */
+      font-size: 12px;
+      font-weight: 600;
       line-height: 1.2;
       margin-left: 4px;
       white-space: nowrap;
@@ -499,8 +513,7 @@ function ensureStyles() {
       transform: translateY(0.5px);
     }
     #${ROOT_ID} label.chatworthy-item input[type="checkbox"] {
-      /* leave room for focus ring so it doesn't clip on the left */
-      margin-left: 2px;
+      margin-left: 2px; /* room for focus ring */
     }
   `;
   (document.head || document.documentElement).appendChild(style);
