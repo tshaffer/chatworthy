@@ -1,16 +1,14 @@
 // Mark as a module (good for TS/isolatedModules)
 
 import type { ExportNoteMetadata, ExportTurn } from './types';
-// New helper that picks the right exporter (legacy HTML-flavored vs pure MD)
-import { buildMarkdownExportByFormat, filenameSafe } from './utils/exporters';
-import { toChatGPTLikeHTML } from './utils/exporters';
+// Helper that chooses legacy HTML-flavored MD vs. pure MD
+import { buildMarkdownExportByFormat } from './utils/exporters';
 
 /**
  * ------------------------------------------------------------
  *  Chatsworthy Content Script (v2 — Chatalog-ready)
  *  - Floating “Export” UI (collapsible)
  *  - Robust observer for new messages
- *  - New buildExport + downloadExport (YAML front matter + transcript)
  *  - Adds a "Pure Markdown" export option (no embedded HTML)
  * ------------------------------------------------------------
  */
@@ -25,7 +23,6 @@ const TOGGLE_BTN_ID = 'chatworthy-toggle-btn';
 const ALL_BTN_ID = 'chatworthy-all-btn';
 const NONE_BTN_ID = 'chatworthy-none-btn';
 const PURE_MD_CHECKBOX_ID = 'chatworthy-pure-md';
-const EXPORT_HTML_BTN_ID = 'chatworthy-export-html-btn';
 
 const OBSERVER_THROTTLE_MS = 200;
 const COLLAPSE_LS_KEY = 'chatsworthy:collapsed';
@@ -353,7 +350,7 @@ function ensureFloatingUI() {
       root.style.display = 'flex';
       root.style.flexDirection = 'column';
       root.style.gap = '8px';
-      root.style.maxWidth = '340px';
+      root.style.maxWidth = '420px';
 
       (document.body || document.documentElement).appendChild(root);
 
@@ -364,8 +361,8 @@ function ensureFloatingUI() {
       controls.style.alignItems = 'center';
       controls.style.justifyContent = 'flex-end'; // 👉 right-justify buttons
       controls.style.gap = '6px';
-      controls.style.flexWrap = 'wrap';
-      controls.style.width = '100%';              // ensures it uses full root width
+      controls.style.flexWrap = 'nowrap';         // 👉 single line
+      controls.style.width = '100%';              // ensures full root width
 
       const toggleBtn = document.createElement('button');
       toggleBtn.id = TOGGLE_BTN_ID;
@@ -385,10 +382,8 @@ function ensureFloatingUI() {
 
       // Pure Markdown checkbox (persists via localStorage)
       const pureLabel = document.createElement('label');
-      pureLabel.style.display = 'inline-flex';
-      pureLabel.style.alignItems = 'center';
-      pureLabel.style.gap = '4px';
-      pureLabel.style.marginLeft = '8px';
+      pureLabel.className = 'chatworthy-toggle';        // styled in ensureStyles()
+      pureLabel.htmlFor = PURE_MD_CHECKBOX_ID;
 
       const pureCb = document.createElement('input');
       pureCb.type = 'checkbox';
@@ -409,17 +404,11 @@ function ensureFloatingUI() {
       exportBtn.type = 'button';
       exportBtn.textContent = 'Export';
 
-      const exportHtmlBtn = document.createElement('button');
-      exportHtmlBtn.id = EXPORT_HTML_BTN_ID;
-      exportHtmlBtn.type = 'button';
-      exportHtmlBtn.textContent = 'Export HTML';
-
       controls.appendChild(toggleBtn);
       controls.appendChild(btnAll);
       controls.appendChild(btnNone);
       controls.appendChild(pureLabel);
       controls.appendChild(exportBtn);
-      controls.appendChild(exportHtmlBtn);
 
       // List (below controls; grows downward)
       const list = document.createElement('div');
@@ -463,37 +452,6 @@ function ensureFloatingUI() {
         } catch (err) {
           console.error('[Chatsworthy] export failed:', err);
           alert('Export failed — see console for details.');
-        }
-      };
-
-      exportHtmlBtn.onclick = () => {
-        try {
-          const filtered = buildSelectedTurns();
-          if (filtered.length === 0) {
-            alert('Select at least one prompt to export.');
-            return;
-          }
-
-          const meta = {
-            noteId: generateNoteId(),
-            source: 'chatgpt',
-            chatId: getChatIdFromUrl(location.href),
-            chatTitle: getTitle(),
-            pageUrl: location.href,
-            exportedAt: new Date().toISOString(),
-            model: undefined,
-            summary: null, tags: [],
-            autoGenerate: { summary: true, tags: true },
-            noteMode: 'auto', turnCount: filtered.length, splitHints: [],
-            author: 'me', visibility: 'private',
-          } satisfies ExportNoteMetadata;
-
-          const html = toChatGPTLikeHTML(meta, filtered);
-          const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-          downloadExport(`${filenameSafe(getTitle())}.html`, blob);
-        } catch (err) {
-          console.error('[Chatsworthy] HTML export failed:', err);
-          alert('Export HTML failed — see console for details.');
         }
       };
 
@@ -554,11 +512,26 @@ function ensureStyles() {
       border-radius: 6px;
       background: white;
       font-size: 12px;
+      line-height: 1.2;
     }
     #${ROOT_ID} button:disabled {
       opacity: 0.45;
       cursor: not-allowed;
       filter: grayscale(100%);
+    }
+    /* Make the "Pure MD" label match button text */
+    #${ROOT_ID} .chatworthy-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;      /* match button font-size */
+      font-weight: 600;     /* match "Show List" emphasis */
+      line-height: 1.2;
+      margin-left: 4px;
+      white-space: nowrap;
+    }
+    #${ROOT_ID} .chatworthy-toggle input {
+      transform: translateY(0.5px);
     }
     #${ROOT_ID} label.chatworthy-item input[type="checkbox"] {
       /* leave room for focus ring so it doesn't clip on the left */
