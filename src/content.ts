@@ -1,7 +1,8 @@
 // Mark as a module (good for TS/isolatedModules)
 
 import type { ExportNoteMetadata, ExportTurn } from './types';
-import { toMarkdownWithFrontMatter } from './utils/exporters';
+// New helper that picks the right exporter (legacy HTML-flavored vs pure MD)
+import { buildMarkdownExportByFormat } from './utils/exporters';
 
 /**
  * ------------------------------------------------------------
@@ -9,6 +10,7 @@ import { toMarkdownWithFrontMatter } from './utils/exporters';
  *  - Floating “Export” UI (collapsible)
  *  - Robust observer for new messages
  *  - New buildExport + downloadExport (YAML front matter + transcript)
+ *  - Adds a "Pure Markdown" export option (no embedded HTML)
  * ------------------------------------------------------------
  */
 
@@ -21,9 +23,14 @@ const EXPORT_BTN_ID = 'chatworthy-export-btn';
 const TOGGLE_BTN_ID = 'chatworthy-toggle-btn';
 const ALL_BTN_ID = 'chatworthy-all-btn';
 const NONE_BTN_ID = 'chatworthy-none-btn';
+const PURE_MD_CHECKBOX_ID = 'chatworthy-pure-md';
 
 const OBSERVER_THROTTLE_MS = 200;
 const COLLAPSE_LS_KEY = 'chatsworthy:collapsed';
+const FORMAT_LS_KEY = 'chatsworthy:export-format';
+
+// Local union here so you don't need to change your global types immediately.
+type ExportFormat = 'markdown_html' | 'markdown_pure';
 
 // ---- Singleton + Killswitch -------------------------------
 
@@ -187,6 +194,23 @@ function extractTurns(): ExportTurn[] {
   return turns;
 }
 
+// ---- Export Format State -----------------------------------
+
+function getInitialExportFormat(): ExportFormat {
+  try {
+    const raw = localStorage.getItem(FORMAT_LS_KEY);
+    if (raw === 'markdown_pure' || raw === 'markdown_html') return raw;
+  } catch { /* ignore */ }
+  return 'markdown_html'; // default to current behavior
+}
+
+let exportFormat: ExportFormat = getInitialExportFormat();
+
+function setExportFormat(fmt: ExportFormat) {
+  exportFormat = fmt;
+  try { localStorage.setItem(FORMAT_LS_KEY, fmt); } catch { /* ignore */ }
+}
+
 function buildExportFromTurns(
   turns: ExportTurn[],
   subject = '',
@@ -197,7 +221,7 @@ function buildExportFromTurns(
     noteId: generateNoteId(),
     source: 'chatgpt',
     chatId: getChatIdFromUrl(location.href),
-    chatTitle: document.title,
+    chatTitle: getTitle(),
     pageUrl: location.href,
     exportedAt: new Date().toISOString(),
     model: undefined,
@@ -217,7 +241,13 @@ function buildExportFromTurns(
     visibility: 'private',
   } satisfies ExportNoteMetadata;
 
-  return toMarkdownWithFrontMatter(meta, turns, notes);
+  // Use the format-aware builder; pass freeform notes as a string (legacy compat)
+  return buildMarkdownExportByFormat(
+    exportFormat,
+    meta,
+    turns,
+    { title: meta.chatTitle, freeformNotes: notes }
+  );
 }
 
 function buildExport(subject = '', topic = '', notes = ''): string {
@@ -227,7 +257,7 @@ function buildExport(subject = '', topic = '', notes = ''): string {
     noteId: generateNoteId(),
     source: 'chatgpt',
     chatId: getChatIdFromUrl(location.href),
-    chatTitle: document.title,
+    chatTitle: getTitle(),
     pageUrl: location.href,
     exportedAt: new Date().toISOString(),
     model: undefined,
@@ -247,7 +277,12 @@ function buildExport(subject = '', topic = '', notes = ''): string {
     visibility: 'private',
   } satisfies ExportNoteMetadata;
 
-  return toMarkdownWithFrontMatter(meta, turns, notes);
+  return buildMarkdownExportByFormat(
+    exportFormat,
+    meta,
+    turns,
+    { title: meta.chatTitle, freeformNotes: notes }
+  );
 }
 
 /**
@@ -346,6 +381,27 @@ function ensureFloatingUI() {
       btnNone.type = 'button';
       btnNone.textContent = 'None';
 
+      // Pure Markdown checkbox (persists via localStorage)
+      const pureLabel = document.createElement('label');
+      pureLabel.style.display = 'inline-flex';
+      pureLabel.style.alignItems = 'center';
+      pureLabel.style.gap = '4px';
+      pureLabel.style.marginLeft = '8px';
+
+      const pureCb = document.createElement('input');
+      pureCb.type = 'checkbox';
+      pureCb.id = PURE_MD_CHECKBOX_ID;
+      pureCb.checked = (exportFormat === 'markdown_pure');
+      pureCb.addEventListener('change', () => {
+        setExportFormat(pureCb.checked ? 'markdown_pure' : 'markdown_html');
+      });
+
+      const pureSpan = document.createElement('span');
+      pureSpan.textContent = 'Pure MD';
+
+      pureLabel.appendChild(pureCb);
+      pureLabel.appendChild(pureSpan);
+
       const exportBtn = document.createElement('button');
       exportBtn.id = EXPORT_BTN_ID;
       exportBtn.type = 'button';
@@ -354,6 +410,7 @@ function ensureFloatingUI() {
       controls.appendChild(toggleBtn);
       controls.appendChild(btnAll);
       controls.appendChild(btnNone);
+      controls.appendChild(pureLabel);
       controls.appendChild(exportBtn);
 
       // List (below controls; grows downward)
@@ -376,12 +433,12 @@ function ensureFloatingUI() {
       };
 
       btnAll.onclick = () => {
-        root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(cb => (cb.checked = true));
+        root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-uindex]').forEach(cb => (cb.checked = true));
         updateControlsState();
       };
 
       btnNone.onclick = () => {
-        root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(cb => (cb.checked = false));
+        root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-uindex]').forEach(cb => (cb.checked = false));
         updateControlsState();
       };
 
@@ -463,6 +520,10 @@ function ensureStyles() {
       opacity: 0.45;
       cursor: not-allowed;
       filter: grayscale(100%);
+    }
+    #${ROOT_ID} label.chatworthy-item input[type="checkbox"] {
+      /* leave room for focus ring so it doesn't clip on the left */
+      margin-left: 2px;
     }
   `;
   (document.head || document.documentElement).appendChild(style);
