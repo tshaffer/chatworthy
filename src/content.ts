@@ -2,7 +2,8 @@
 
 import type { ExportNoteMetadata, ExportTurn } from './types';
 // New helper that picks the right exporter (legacy HTML-flavored vs pure MD)
-import { buildMarkdownExportByFormat } from './utils/exporters';
+import { buildMarkdownExportByFormat, filenameSafe } from './utils/exporters';
+import { toChatGPTLikeHTML } from './utils/exporters';
 
 /**
  * ------------------------------------------------------------
@@ -24,6 +25,7 @@ const TOGGLE_BTN_ID = 'chatworthy-toggle-btn';
 const ALL_BTN_ID = 'chatworthy-all-btn';
 const NONE_BTN_ID = 'chatworthy-none-btn';
 const PURE_MD_CHECKBOX_ID = 'chatworthy-pure-md';
+const EXPORT_HTML_BTN_ID = 'chatworthy-export-html-btn';
 
 const OBSERVER_THROTTLE_MS = 200;
 const COLLAPSE_LS_KEY = 'chatsworthy:collapsed';
@@ -407,11 +409,17 @@ function ensureFloatingUI() {
       exportBtn.type = 'button';
       exportBtn.textContent = 'Export';
 
+      const exportHtmlBtn = document.createElement('button');
+      exportHtmlBtn.id = EXPORT_HTML_BTN_ID;
+      exportHtmlBtn.type = 'button';
+      exportHtmlBtn.textContent = 'Export HTML';
+
       controls.appendChild(toggleBtn);
       controls.appendChild(btnAll);
       controls.appendChild(btnNone);
       controls.appendChild(pureLabel);
       controls.appendChild(exportBtn);
+      controls.appendChild(exportHtmlBtn);
 
       // List (below controls; grows downward)
       const list = document.createElement('div');
@@ -455,6 +463,37 @@ function ensureFloatingUI() {
         } catch (err) {
           console.error('[Chatsworthy] export failed:', err);
           alert('Export failed — see console for details.');
+        }
+      };
+
+      exportHtmlBtn.onclick = () => {
+        try {
+          const filtered = buildSelectedTurns();
+          if (filtered.length === 0) {
+            alert('Select at least one prompt to export.');
+            return;
+          }
+
+          const meta = {
+            noteId: generateNoteId(),
+            source: 'chatgpt',
+            chatId: getChatIdFromUrl(location.href),
+            chatTitle: getTitle(),
+            pageUrl: location.href,
+            exportedAt: new Date().toISOString(),
+            model: undefined,
+            summary: null, tags: [],
+            autoGenerate: { summary: true, tags: true },
+            noteMode: 'auto', turnCount: filtered.length, splitHints: [],
+            author: 'me', visibility: 'private',
+          } satisfies ExportNoteMetadata;
+
+          const html = toChatGPTLikeHTML(meta, filtered);
+          const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+          downloadExport(`${filenameSafe(getTitle())}.html`, blob);
+        } catch (err) {
+          console.error('[Chatsworthy] HTML export failed:', err);
+          alert('Export HTML failed — see console for details.');
         }
       };
 
