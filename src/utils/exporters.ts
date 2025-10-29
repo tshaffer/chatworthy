@@ -19,15 +19,19 @@ function toYAML(meta: ExportNoteMetadata): string {
   lines.push(`subject: ${yamlEscape(meta.subject ?? '')}`);
   lines.push(`topic: ${yamlEscape(meta.topic ?? '')}`);
 
-  lines.push(`summary: ${meta.summary === null ? 'null' : yamlEscape(meta.summary)}`);
+  lines.push(`summary: ${meta.summary === null ? 'null' : yamlEscape(meta.summary ?? '')}`);
   lines.push(`tags: [${(meta.tags ?? []).map(t => yamlEscape(t)).join(', ')}]`);
   lines.push(`autoGenerate:`);
-  lines.push(`  summary: ${meta.autoGenerate.summary}`);
-  lines.push(`  tags: ${meta.autoGenerate.tags}`);
+  const ag = meta.autoGenerate ?? { summary: true, tags: true };
+  lines.push(`autoGenerate:`);
+  lines.push(`  summary: ${ag.summary}`);
+  lines.push(`  tags: ${ag.tags}`);
 
-  lines.push(`noteMode: ${yamlEscape(meta.noteMode)}`);
-  lines.push(`turnCount: ${meta.turnCount}`);
-  lines.push(`splitHints: [${meta.splitHints.map(pair => `[${pair[0]}, ${pair[1]}]`).join(', ')}]`);
+  if (meta.noteMode) lines.push(`noteMode: ${yamlEscape(meta.noteMode)}`);
+  if (typeof meta.turnCount === 'number') lines.push(`turnCount: ${meta.turnCount}`);
+  if (meta.splitHints?.length) {
+    lines.push(`splitHints: [${meta.splitHints.map(h => yamlEscape(h)).join(', ')}]`);
+  }
 
   if (meta.author) lines.push(`author: ${yamlEscape(meta.author)}`);
   if (meta.visibility) lines.push(`visibility: ${yamlEscape(meta.visibility)}`);
