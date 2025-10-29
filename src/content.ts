@@ -249,41 +249,6 @@ function buildExportFromTurns(
   );
 }
 
-function buildExport(subject = '', topic = '', notes = ''): string {
-  const turns = extractTurns();
-
-  const meta = {
-    noteId: generateNoteId(),
-    source: 'chatgpt',
-    chatId: getChatIdFromUrl(location.href),
-    chatTitle: getTitle(),
-    pageUrl: location.href,
-    exportedAt: new Date().toISOString(),
-    model: undefined,
-
-    subject,
-    topic,
-
-    summary: null,
-    tags: [],
-    autoGenerate: { summary: true, tags: true },
-
-    noteMode: 'auto',
-    turnCount: turns.length,
-    splitHints: [],
-
-    author: 'me',
-    visibility: 'private',
-  } satisfies ExportNoteMetadata;
-
-  return buildMarkdownExportByFormat(
-    exportFormat,
-    meta,
-    turns,
-    { title: meta.chatTitle, freeformNotes: notes }
-  );
-}
-
 /**
  * Downloads the built markdown file
  */
