@@ -61,29 +61,6 @@ export function toMarkdownWithFrontMatter(
   return `${frontMatter}\n\n# Transcript\n\n${turnsBlock}${notesSection}`;
 }
 
-function renderFrontMatter(meta: ExportNoteMetadata): string {
-  // Keep YAML front matter — VS Code preview supports it
-  // (If you want to drop it entirely, return '' here.)
-  const lines: string[] = ['---'];
-  const pushIf = (k: string, v: any) => {
-    if (v === undefined || v === null || v === '') return;
-    lines.push(`${k}: ${Array.isArray(v) ? JSON.stringify(v) : String(v)}`);
-  };
-  pushIf('noteId', meta.noteId);
-  pushIf('source', meta.source);
-  pushIf('chatId', meta.chatId);
-  pushIf('chatTitle', meta.chatTitle);
-  pushIf('pageUrl', meta.pageUrl);
-  pushIf('exportedAt', meta.exportedAt);
-  pushIf('model', meta.model);
-  pushIf('subject', meta.subject);
-  pushIf('topic', meta.topic);
-  pushIf('summary', meta.summary);
-  pushIf('tags', meta.tags);
-  lines.push('---', '');
-  return lines.join('\n');
-}
-
 // Basic role → label mapping for headings
 const ROLE_LABEL: Record<ExportTurn['role'], string> = {
   user: 'User',
@@ -138,29 +115,6 @@ export function toPureMarkdownWithFrontMatter(
   });
 
   return chunks.join('\n');
-}
-
-export function buildMarkdownExportByFormat(
-  format: ExportFormat,
-  meta: ExportNoteMetadata,
-  turns: ExportTurn[],
-  opts?: { title?: string; freeformNotes?: string }
-): string {
-  // If caller provided a title override, reflect it into meta.chatTitle
-  const metaWithTitle: ExportNoteMetadata = opts?.title
-    ? { ...meta, chatTitle: opts.title }
-    : meta;
-
-  if (format === 'markdown_pure') {
-    return toPureMarkdownWithFrontMatter(metaWithTitle, turns, { title: metaWithTitle.chatTitle });
-  }
-
-  // ✅ Legacy exporter expects a STRING as the 3rd arg
-  return toMarkdownWithFrontMatter(
-    metaWithTitle,
-    turns,
-    opts?.freeformNotes // <-- string | undefined, matches your signature
-  );
 }
 
 function esc(s: string): string {
@@ -243,42 +197,237 @@ pre.cg-code code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"
 hr{border:none;border-top:1px solid var(--border);margin:24px 0}
 `;
 
+// --- Common small helpers ----------------------------------------------------
+
+export function filenameSafe(s: string): string {
+  return (s || 'chat-export').replace(/[\\/:*?"<>|]/g, ' ').trim() || 'chat-export';
+}
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function roleLabel(role: ExportTurn['role']): 'You' | 'ChatGPT' | 'System' | 'Tool' {
+  if (role === 'user') return 'You';
+  if (role === 'assistant') return 'ChatGPT';
+  if (role === 'system') return 'System';
+  return 'Tool';
+}
+
+function renderFrontMatter(meta: ExportNoteMetadata): string {
+  // Keep or drop keys as you prefer; VS Code/GitHub ignore YAML visually.
+  const kv: Record<string, any> = {
+    noteId: meta.noteId,
+    source: meta.source,
+    chatId: meta.chatId,
+    chatTitle: meta.chatTitle,
+    pageUrl: meta.pageUrl,
+    exportedAt: meta.exportedAt,
+    model: meta.model,
+    subject: (meta as any).subject,
+    topic: (meta as any).topic,
+    summary: (meta as any).summary,
+    tags: (meta as any).tags,
+  };
+  const lines = ['---'];
+  for (const [k, v] of Object.entries(kv)) {
+    if (v === undefined || v === null || v === '') continue;
+    lines.push(`${k}: ${Array.isArray(v) ? JSON.stringify(v) : String(v)}`);
+  }
+  lines.push('---', '');
+  return lines.join('\n');
+}
+
+// --- 1) Pure Markdown (ChatGPT Exporter–style) -------------------------------
+
+/**
+ * Produces Markdown that looks like the ChatGPT Exporter extension:
+ *
+ * # <title>
+ *
+ * **You:**␠␠
+ * <message>
+ *
+ * ---
+ *
+ * **ChatGPT:**␠␠
+ * <message>
+ *
+ * (two spaces at the end of the label line force a <br> line-break in MD)
+ */
+export function toPureMarkdownChatStyle(
+  meta: ExportNoteMetadata,
+  turns: ExportTurn[],
+  opts?: {
+    title?: string;
+    includeFrontMatter?: boolean;  // default true
+    includeMetaRow?: boolean;      // default true (Source/ExportedAt)
+    hrBetween?: boolean;           // default true
+    freeformNotes?: string;        // optional "## Notes" at end
+  }
+): string {
+  const {
+    title = meta.chatTitle || 'Chat Export',
+    includeFrontMatter = true,
+    includeMetaRow = true,
+    hrBetween = true,
+    freeformNotes,
+  } = opts || {};
+
+  const out: string[] = [];
+  if (includeFrontMatter) out.push(renderFrontMatter(meta));
+
+  out.push(`# ${title}`, '');
+
+  if (includeMetaRow) {
+    if (meta.pageUrl) out.push(`Source: ${meta.pageUrl}`);
+    if (meta.exportedAt) out.push(`Exported: ${meta.exportedAt}`);
+    out.push('');
+  }
+
+  const sep = hrBetween ? '\n---\n\n' : '\n\n';
+
+  const blocks = turns.map((t) => {
+    const label = roleLabel(t.role);
+    const body = (t.text || '').replace(/\r\n/g, '\n').trimEnd();
+    // Two trailing spaces before newline force a line break in Markdown
+    return `**${label}:**  \n${body}`;
+  });
+
+  out.push(blocks.join(sep));
+
+  if (freeformNotes && freeformNotes.trim()) {
+    out.push('', '## Notes', '', freeformNotes.trim(), '');
+  }
+
+  // Ensure trailing newline for nicer diffs
+  if (out[out.length - 1] !== '') out.push('');
+  return out.join('\n');
+}
+
+// --- 2) ChatGPT-like HTML (bubble UI) ----------------------------------------
+// Keep your improved HTML exporter here. If you already added one, you can keep
+// it as-is. This version is the “v2” we discussed.
+
 export function toChatGPTLikeHTML(meta: ExportNoteMetadata, turns: ExportTurn[]): string {
+  const CHATGPT_EMBEDDED_CSS = `
+:root{
+  --bg:#fff; --fg:#111827; --muted:#6b7280;
+  --assistant:#f7f7f8; --user:#e6f4ff; --border:#e5e7eb;
+  --code-bg:#0b1020; --code-fg:#e5eef7; --bubble-shadow:0 1px 2px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark){
+:root{
+  --bg:#0b0e14; --fg:#e8ecf1; --muted:#9aa3ad;
+  --assistant:#111827; --user:#0f172a; --border:#252b36;
+  --code-bg:#0e1428; --code-fg:#e5eef7; --bubble-shadow:0 1px 2px rgba(0,0,0,.5);
+}}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:14px/1.6 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+a{color:inherit;text-decoration:underline}
+img{max-width:100%;border-radius:8px}
+main.cg-wrap{max-width:840px;margin:32px auto 56px;padding:0 16px}
+h1{font-size:20px;margin:0 0 12px 0}
+.cg-meta{font-size:12px;color:var(--muted);margin-bottom:16px}
+.cg-turn{display:flex;gap:12px;margin:14px 0}
+.cg-bubble{flex:1;border:1px solid var(--border);border-radius:14px;padding:12px 14px;background:var(--assistant);box-shadow:var(--bubble-shadow)}
+.cg-turn.user .cg-bubble{background:var(--user)}
+.cg-avatar{flex:0 0 28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);color:var(--muted);font-size:12px}
+.cg-role{font-weight:600;margin:0 0 6px 0;font-size:13px;color:var(--muted)}
+blockquote{border-left:3px solid var(--border);padding-left:10px;margin:8px 0;color:var(--fg)}
+ul,ol{padding-left:22px;margin:8px 0}
+pre.cg-code{background:var(--code-bg);color:var(--code-fg);padding:12px;border-radius:10px;overflow:auto;margin:0}
+pre.cg-code code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:12.5px}
+.cg-inline{background:rgba(127,127,127,.15);border-radius:4px;padding:.1em .35em}
+hr{border:none;border-top:1px solid var(--border);margin:20px 0}
+`;
+
+  function renderMessageBody(md: string): string {
+    // ultra-light renderer: keep paragraphs & code fences intact
+    const lines = (md || '').replace(/\r\n/g, '\n').split('\n');
+    let html = '';
+    let inCode = false;
+    for (const line of lines) {
+      const fence = /^```/.test(line);
+      if (fence) {
+        html += inCode ? '</code></pre>' : '<pre class="cg-code"><code>';
+        inCode = !inCode;
+        continue;
+      }
+      if (inCode) {
+        html += escHtml(line) + '\n';
+      } else if (line.trim() === '') {
+        html += '<div style="height:8px"></div>';
+      } else {
+        html += `<p>${escHtml(line)}</p>`;
+      }
+    }
+    if (inCode) html += '</code></pre>';
+    return html;
+  }
+
   const title = meta.chatTitle || 'Chat Export';
-  const metaRows = [
-    meta.pageUrl ? `Source: <a href="${esc(meta.pageUrl)}">${esc(meta.pageUrl)}</a>` : '',
-    meta.exportedAt ? `Exported: ${esc(meta.exportedAt)}` : '',
-    meta.model ? `Model: ${esc(String(meta.model))}` : '',
+  const metaRow = [
+    meta.pageUrl ? `Source: <a href="${escHtml(meta.pageUrl)}">${escHtml(meta.pageUrl)}</a>` : '',
+    meta.exportedAt ? `Exported: ${escHtml(meta.exportedAt)}` : '',
+    meta.model ? `Model: ${escHtml(String(meta.model))}` : ''
   ].filter(Boolean).join(' &nbsp;•&nbsp; ');
 
-  const items = turns.map(t => {
-    const role = t.role === 'user' ? 'user' : t.role; // only user/assistant typically
+  const items = turns.map((t) => {
+    const role = t.role === 'user' ? 'user' : 'assistant';
     const avatar = role === 'user' ? 'U' : 'A';
     return `
-      <article class="cg-turn ${role}">
+      <section class="cg-turn ${role}">
         <div class="cg-avatar" aria-hidden="true">${avatar}</div>
-        <div class="cg-body">
-          <div class="cg-role">${role === 'user' ? 'User' : role === 'assistant' ? 'Assistant' : role[0].toUpperCase() + role.slice(1)}</div>
-          ${renderTextAsHtmlBlocks(t.text || '')}
+        <div class="cg-bubble">
+          <div class="cg-role">${role === 'user' ? 'You' : 'ChatGPT'}</div>
+          ${renderMessageBody(t.text || '')}
         </div>
-      </article>
-    `;
+      </section>`;
   }).join('\n');
 
   return `<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title>
+<title>${escHtml(title)}</title>
 <style>${CHATGPT_EMBEDDED_CSS}</style>
 <main class="cg-wrap">
-  <h1>${esc(title)}</h1>
-  ${metaRows ? `<div class="cg-meta">${metaRows}</div>` : ''}
+  <h1>${escHtml(title)}</h1>
+  ${metaRow ? `<div class="cg-meta">${metaRow}</div>` : ''}
   ${items}
 </main>
 </html>`;
 }
 
-export function filenameSafe(s: string): string {
-  return (s || 'chat-export').replace(/[\\/:*?"<>|]/g, ' ').trim() || 'chat-export';
+// --- 3) Format-aware builder (keeps your legacy exporter intact) --------------
+
+/**
+ * Chooses between:
+ * - 'markdown_pure'  => toPureMarkdownChatStyle (this file)
+ * - 'markdown_html'  => your existing toMarkdownWithFrontMatter(meta, turns, freeformNotes)
+ */
+export function buildMarkdownExportByFormat(
+  format: 'markdown_html' | 'markdown_pure',
+  meta: ExportNoteMetadata,
+  turns: ExportTurn[],
+  opts?: { title?: string; freeformNotes?: string; includeFrontMatter?: boolean }
+): string {
+  const metaWithTitle: ExportNoteMetadata = opts?.title
+    ? { ...meta, chatTitle: opts.title }
+    : meta;
+
+  if (format === 'markdown_pure') {
+    return toPureMarkdownChatStyle(metaWithTitle, turns, {
+      title: metaWithTitle.chatTitle,
+      includeFrontMatter: opts?.includeFrontMatter ?? true,
+      includeMetaRow: true,
+      hrBetween: true,
+      freeformNotes: opts?.freeformNotes,
+    });
+  }
+
+  // ✅ Legacy exporter expects a STRING as the 3rd arg (freeform notes)
+  //    Keep your original implementation unmodified.
+  return toMarkdownWithFrontMatter(metaWithTitle, turns, opts?.freeformNotes);
 }
