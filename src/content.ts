@@ -5,7 +5,7 @@ import { buildMarkdownExportByFormat } from './utils/exporters';
 
 /**
  * ------------------------------------------------------------
- *  Chatsworthy Content Script (v2 — Chatalog-ready)
+ *  chatworthy Content Script (v2 — Chatalog-ready)
  *  - Floating “Export” UI (collapsible)
  *  - Robust observer for new messages
  *  - Adds a "Pure Markdown" export option (no embedded HTML)
@@ -16,7 +16,7 @@ import { buildMarkdownExportByFormat } from './utils/exporters';
 
 // ---- Config ------------------------------------------------
 
-const ROOT_ID = 'chatsworthy-root';
+const ROOT_ID = 'chatworthy-root';
 const LIST_ID = 'chatworthy-list';
 const CONTROLS_ID = 'chatworthy-controls';
 const EXPORT_BTN_ID = 'chatworthy-export-btn';
@@ -26,10 +26,26 @@ const NONE_BTN_ID = 'chatworthy-none-btn';
 const PURE_MD_CHECKBOX_ID = 'chatworthy-pure-md';
 
 const OBSERVER_THROTTLE_MS = 200;
-const COLLAPSE_LS_KEY = 'chatsworthy:collapsed';
-const FORMAT_LS_KEY = 'chatsworthy:export-format';
+const COLLAPSE_LS_KEY = 'chatworthy:collapsed';
+const FORMAT_LS_KEY = 'chatworthy:export-format';
 
 type ExportFormat = 'markdown_html' | 'markdown_pure';
+
+let repairTimer: number | null = null;
+
+function startRepairLoop() {
+  if (repairTimer != null) return;
+  repairTimer = window.setInterval(() => {
+    try {
+      ensureFloatingUI();
+      // stop once the list exists
+      if (document.getElementById(LIST_ID)) {
+        clearInterval(repairTimer!);
+        repairTimer = null;
+      }
+    } catch { /* ignore */ }
+  }, 1500);
+}
 
 // ---- Singleton + Killswitch -------------------------------
 
@@ -38,20 +54,20 @@ type ExportFormat = 'markdown_html' | 'markdown_pure';
 
   try {
     const disabled =
-      localStorage.getItem('chatsworthy:disable') === '1' ||
-      new URLSearchParams(location.search).has('chatsworthy-disable');
+      localStorage.getItem('chatworthy:disable') === '1' ||
+      new URLSearchParams(location.search).has('chatworthy-disable');
     if (disabled) {
-      console.warn('[Chatsworthy] Disabled by kill switch');
+      console.warn('[chatworthy] Disabled by kill switch');
       return;
     }
   } catch { /* ignore */ }
 
-  if (w.__chatsworthy_init__) return;
-  w.__chatsworthy_init__ = true;
+  if (w.__chatworthy_init__) return;
+  w.__chatworthy_init__ = true;
 
   if (window.top !== window) return;
 
-  init().catch(err => console.error('[Chatsworthy] init failed', err));
+  init().catch(err => console.error('[chatworthy] init failed', err));
 })();
 
 // ---- Helpers -----------------------------------------------
@@ -474,7 +490,7 @@ function ensureFloatingUI() {
       setCollapsed(getInitialCollapsed());
     }
 
-    // 2) Controls — (re)create if missing
+    // 2) Controls — (re)create if missing and (re)wire handlers
     let controls = d.getElementById(CONTROLS_ID) as HTMLDivElement | null;
     if (!controls) {
       controls = d.createElement('div');
@@ -489,7 +505,7 @@ function ensureFloatingUI() {
       const toggleBtn = d.createElement('button');
       toggleBtn.id = TOGGLE_BTN_ID;
       toggleBtn.type = 'button';
-      toggleBtn.textContent = 'Show List';
+      toggleBtn.textContent = (root.getAttribute('data-collapsed') === '1') ? 'Show List' : 'Hide List';
       toggleBtn.style.fontWeight = '600';
       toggleBtn.onclick = () => {
         const isCollapsed = root!.getAttribute('data-collapsed') !== '0';
@@ -528,7 +544,6 @@ function ensureFloatingUI() {
 
       const pureSpan = d.createElement('span');
       pureSpan.textContent = 'Pure MD';
-
       pureLabel.appendChild(pureCb);
       pureLabel.appendChild(pureSpan);
 
@@ -546,7 +561,7 @@ function ensureFloatingUI() {
           const md = buildExportFromTurns(turns, '', '', '', htmlBodies);
           downloadExport(`${filenameBase()}.md`, md);
         } catch (err) {
-          console.error('[Chatsworthy] export failed:', err);
+          console.error('[chatworthy] export failed:', err);
           alert('Export failed — see console for details.');
         }
       };
@@ -557,12 +572,8 @@ function ensureFloatingUI() {
       controls.appendChild(pureLabel);
       controls.appendChild(exportBtn);
       root.appendChild(controls);
-
-      // Sync toggle button label with current collapsed state
-      const toggle = controls.querySelector('#' + TOGGLE_BTN_ID) as HTMLButtonElement | null;
-      if (toggle) toggle.textContent = (root.getAttribute('data-collapsed') === '1') ? 'Show List' : 'Hide List';
     } else {
-      // Make sure toggle text matches state even if controls existed
+      // keep toggle label in sync with state
       const toggle = controls.querySelector('#' + TOGGLE_BTN_ID) as HTMLButtonElement | null;
       if (toggle) toggle.textContent = (root.getAttribute('data-collapsed') === '1') ? 'Show List' : 'Hide List';
     }
@@ -580,7 +591,7 @@ function ensureFloatingUI() {
       root.appendChild(list);
     }
 
-    // 4) Populate list from page-side roles (robust even if timing varies)
+    // 4) Populate list from page-side roles (robust)
     list.innerHTML = '';
     const allRoleNodes = Array.from(d.querySelectorAll<HTMLElement>('[data-cw-role]'));
     const userNodes = allRoleNodes.filter(n => n.getAttribute('data-cw-role') === 'user');
@@ -595,13 +606,12 @@ function ensureFloatingUI() {
 
       const cb = d.createElement('input');
       cb.type = 'checkbox';
-      const indexInAll = allRoleNodes.indexOf(node); // we export using full stream indexes
+      const indexInAll = allRoleNodes.indexOf(node);
       cb.dataset.uindex = String(indexInAll);
       cb.addEventListener('change', updateControlsState);
 
       const span = d.createElement('span');
       span.className = 'chatworthy-item-text';
-      // Sanitize preview (strip our injected labels/hidden nodes)
       const clone = node.cloneNode(true) as HTMLElement;
       clone.querySelectorAll('.cw-role-label,[data-cw-hidden="1"]').forEach(n => n.remove());
       span.textContent = (clone.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
@@ -613,16 +623,14 @@ function ensureFloatingUI() {
     }
 
     updateControlsState();
-    // Keep page labels/typography updated in case new messages arrived
     relabelAndRestyleMessages();
-
   } finally {
     suspendObservers(false);
   }
 }
 
 function ensureStyles() {
-  const STYLE_ID = 'chatsworthy-styles';
+  const STYLE_ID = 'chatworthy-styles';
   if (document.getElementById(STYLE_ID)) return;
 
   const style = document.createElement('style');
@@ -756,7 +764,7 @@ function scheduleEnsure() {
 async function init() {
   const host = location.host || '';
   if (!/^(chatgpt\.com|chat\.openai\.com)$/i.test(host)) {
-    console.warn('[Chatsworthy] Host not allowed; skipping init:', host);
+    console.warn('[chatworthy] Host not allowed; skipping init:', host);
     return;
   }
 
@@ -766,7 +774,8 @@ async function init() {
     );
   }
 
-  console.log('[Chatsworthy] content script active');
+  console.log('[chatworthy] content script active');
   startObserving();
   scheduleEnsure();
+  startRepairLoop();
 }
