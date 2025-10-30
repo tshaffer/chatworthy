@@ -6,3 +6,34 @@ label.chatworthy-item input[type=checkbox]{margin-top:2px}
 #chatworthy-controls{display:flex;gap:6px;align-items:center}
 #chatworthy-controls button,#chatworthy-export-btn{font-size:12px;padding:6px 8px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);background:rgba(255,255,255,0.95);cursor:pointer;font-weight:600}
 #chatworthy-controls button:hover,#chatworthy-export-btn:hover{filter:brightness(0.96)}
+
+/* Our injected label matches assistant label styling */
+[data-message-author-role] > .cw-role-label {
+  font-family: var(--cw-assistant-font-family, inherit) !important;
+  font-size: var(--cw-assistant-font-size, inherit) !important;
+  line-height: var(--cw-assistant-line-height, 1.2) !important;
+  font-weight: 600 !important;
+  color: var(--cw-assistant-color, rgba(0,0,0,0.75)) !important;
+  margin-bottom: 6px !important;
+}
+
+/* Entire Prompt (user) body uses assistant typography */
+[data-message-author-role="user"].cw-unify-to-assistant,
+[data-message-author-role="user"].cw-unify-to-assistant * {
+  font-family: var(--cw-assistant-font-family, inherit) !important;
+  font-size: var(--cw-assistant-font-size, inherit) !important;
+  line-height: var(--cw-assistant-line-height, inherit) !important;
+  color: var(--cw-assistant-color, inherit) !important;
+  font-weight: var(--cw-assistant-font-weight, inherit) !important;
+}
+
+/* Suggestion chips in Responses also match */
+[data-message-author-role="assistant"].cw-assistant-normalize-suggestions button,
+[data-message-author-role="assistant"].cw-assistant-normalize-suggestions a[role="button"],
+[data-message-author-role="assistant"].cw-assistant-normalize-suggestions [data-testid*="suggestion"] {
+  font-family: var(--cw-assistant-font-family, inherit) !important;
+  font-size: var(--cw-assistant-font-size, inherit) !important;
+  line-height: var(--cw-assistant-line-height, inherit) !important;
+  color: var(--cw-assistant-color, inherit) !important;
+  font-weight: var(--cw-assistant-font-weight, inherit) !important;
+}

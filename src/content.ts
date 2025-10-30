@@ -10,6 +10,7 @@ import { buildMarkdownExportByFormat } from './utils/exporters';
  *  - Floating “Export” UI (collapsible)
  *  - Robust observer for new messages
  *  - Adds a "Pure Markdown" export option (no embedded HTML)
+ *  - Relabels "You/ChatGPT" -> "Prompt/Response" and unifies Prompt styling
  * ------------------------------------------------------------
  */
 
@@ -307,6 +308,80 @@ function setCollapsed(v: boolean) {
   if (toggleBtn) toggleBtn.textContent = v ? 'Show List' : 'Hide List';
 }
 
+// ---- Prompt/Response relabel + typography sync -------------
+// Strategy:
+// 1) Detect an assistant message to learn its computed typography.
+// 2) Store those values as CSS variables on <html> so we can reuse them globally.
+// 3) For each user message:
+//    - Inject a standardized label "Prompt" (and "Response" for assistant).
+//    - Apply a class that forces the entire Prompt block to use the assistant typography.
+// 4) For assistant suggestion chips/buttons at the end of a Response, apply the same typography.
+function hideNativeRoleLabels(container: HTMLElement) {
+  // Try a few robust selectors ChatGPT commonly uses for the role header.
+  const candidates = [
+    '[data-testid="author-name"]',
+    'header span, header div',
+    ':scope > div > span', // shallow spans often used in the header
+  ];
+  for (const sel of candidates) {
+    container.querySelectorAll<HTMLElement>(sel).forEach(node => {
+      const txt = (node.textContent || '').trim().toLowerCase();
+      if (txt === 'you' || txt === 'chatgpt') {
+        node.style.display = 'none';
+        node.setAttribute('data-cw-hidden', '1');
+      }
+    });
+  }
+}
+
+function syncAssistantTypographyVars() {
+  // Prefer a rich content child inside the first assistant message
+  const assistantEl =
+    document.querySelector<HTMLElement>('[data-message-author-role="assistant"] .markdown') ||
+    document.querySelector<HTMLElement>('[data-message-author-role="assistant"]');
+  if (!assistantEl) return;
+
+  const cs = getComputedStyle(assistantEl);
+  const root = document.documentElement;
+
+  root.style.setProperty('--cw-assistant-font-family', cs.fontFamily || 'inherit');
+  root.style.setProperty('--cw-assistant-font-size', cs.fontSize || 'inherit');
+  root.style.setProperty('--cw-assistant-line-height', cs.lineHeight || 'inherit');
+  root.style.setProperty('--cw-assistant-font-weight', cs.fontWeight || 'inherit');
+  root.style.setProperty('--cw-assistant-color', cs.color || 'inherit');
+}
+
+function relabelAndRestyleMessages() {
+  syncAssistantTypographyVars();
+
+  const messages = getAllMessageEls();
+
+  for (const el of messages) {
+    if (el.hasAttribute('data-cw-processed')) continue;
+
+    // Hide the native "You/ChatGPT" label if present
+    hideNativeRoleLabels(el);
+
+    const role = el.getAttribute('data-message-author-role');
+    const isUser = role === 'user';
+    const isAssistant = role === 'assistant';
+
+    // Insert our consistent label
+    const header = document.createElement('div');
+    header.className = 'cw-role-label';
+    header.textContent = isUser ? 'Prompt' : (isAssistant ? 'Response' : (role || 'Message'));
+    el.prepend(header);
+
+    // Unify entire Prompt body to assistant typography
+    if (isUser) el.classList.add('cw-unify-to-assistant');
+
+    // Normalize assistant suggestions
+    if (isAssistant) el.classList.add('cw-assistant-normalize-suggestions');
+
+    el.setAttribute('data-cw-processed', '1');
+  }
+}
+
 // ---- Floating UI -------------------------------------------
 
 function ensureFloatingUI() {
@@ -473,6 +548,9 @@ function ensureFloatingUI() {
 
     updateControlsState();
 
+    // Apply relabel + restyle after UI settles
+    relabelAndRestyleMessages();
+
   } finally {
     suspendObservers(false);
   }
@@ -485,36 +563,36 @@ function ensureStyles() {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    #${ROOT_ID} button {
-      padding: 4px 8px;
-      border: 1px solid rgba(0,0,0,0.2);
-      border-radius: 6px;
-      background: white;
-      font-size: 12px;
-      line-height: 1.2;
-    }
-    #${ROOT_ID} button:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-      filter: grayscale(100%);
-    }
-    /* Make the "Pure MD" label match button text */
-    #${ROOT_ID} .chatworthy-toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      line-height: 1.2;
-      margin-left: 4px;
-      white-space: nowrap;
-    }
-    #${ROOT_ID} .chatworthy-toggle input {
-      transform: translateY(0.5px);
-    }
-    #${ROOT_ID} label.chatworthy-item input[type="checkbox"] {
-      margin-left: 2px; /* room for focus ring */
-    }
+/* Our injected label matches assistant label styling */
+[data-message-author-role] > .cw-role-label {
+  font-family: var(--cw-assistant-font-family, inherit) !important;
+  font-size: var(--cw-assistant-font-size, inherit) !important;
+  line-height: var(--cw-assistant-line-height, 1.2) !important;
+  font-weight: 600 !important;
+  color: var(--cw-assistant-color, rgba(0,0,0,0.75)) !important;
+  margin-bottom: 6px !important;
+}
+
+/* Entire Prompt (user) body uses assistant typography */
+[data-message-author-role="user"].cw-unify-to-assistant,
+[data-message-author-role="user"].cw-unify-to-assistant * {
+  font-family: var(--cw-assistant-font-family, inherit) !important;
+  font-size: var(--cw-assistant-font-size, inherit) !important;
+  line-height: var(--cw-assistant-line-height, inherit) !important;
+  color: var(--cw-assistant-color, inherit) !important;
+  font-weight: var(--cw-assistant-font-weight, inherit) !important;
+}
+
+/* Suggestion chips in Responses also match */
+[data-message-author-role="assistant"].cw-assistant-normalize-suggestions button,
+[data-message-author-role="assistant"].cw-assistant-normalize-suggestions a[role="button"],
+[data-message-author-role="assistant"].cw-assistant-normalize-suggestions [data-testid*="suggestion"] {
+  font-family: var(--cw-assistant-font-family, inherit) !important;
+  font-size: var(--cw-assistant-font-size, inherit) !important;
+  line-height: var(--cw-assistant-line-height, inherit) !important;
+  color: var(--cw-assistant-color, inherit) !important;
+  font-weight: var(--cw-assistant-font-weight, inherit) !important;
+}
   `;
   (document.head || document.documentElement).appendChild(style);
 }
@@ -569,6 +647,8 @@ function scheduleEnsure() {
     const run = () => {
       scheduled = false;
       ensureFloatingUI();
+      // Also keep our relabel/restyle current as the DOM evolves
+      relabelAndRestyleMessages();
     };
     if ('requestIdleCallback' in window) {
       (window as any).requestIdleCallback(run, { timeout: 1500 });
