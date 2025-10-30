@@ -96,6 +96,14 @@ function getSelectedPromptIndexes(): number[] {
     .sort((a, b) => a - b);
 }
 
+// Remove our injected bits before reading text/HTML
+function cloneWithoutInjected(el: HTMLElement): HTMLElement {
+  const clone = el.cloneNode(true) as HTMLElement;
+  // Remove our Prompt/Response labels + any nodes we previously hid
+  clone.querySelectorAll('.cw-role-label, [data-cw-hidden="1"]').forEach(n => n.remove());
+  return clone;
+}
+
 // ---- Message discovery (works with your DOM) ---------------
 
 /**
@@ -150,10 +158,13 @@ function getMessageTuples(): Array<{ el: HTMLElement; role: 'user' | 'assistant'
 
 function extractTurns(): ExportTurn[] {
   const tuples = getMessageTuples();
-  return tuples.map(t => ({
-    role: t.role,
-    text: (t.el.textContent ?? '').trim()
-  }));
+  return tuples.map(t => {
+    const clean = cloneWithoutInjected(t.el);
+    return {
+      role: t.role,
+      text: (clean.textContent ?? '').trim()
+    };
+  });
 }
 
 /**
@@ -163,7 +174,10 @@ function extractTurns(): ExportTurn[] {
  */
 function buildSelectedPayload(): { turns: ExportTurn[]; htmlBodies: string[] } {
   const tuples = getMessageTuples();
-  const allTurns: ExportTurn[] = tuples.map(t => ({ role: t.role, text: (t.el.textContent ?? '').trim() }));
+  const allTurns: ExportTurn[] = tuples.map(t => {
+    const clean = cloneWithoutInjected(t.el);
+    return { role: t.role, text: (clean.textContent ?? '').trim() };
+  });
   const allEls: HTMLElement[] = tuples.map(t => t.el);
 
   const selectedUserIdxs = getSelectedPromptIndexes();
@@ -178,13 +192,13 @@ function buildSelectedPayload(): { turns: ExportTurn[]; htmlBodies: string[] } {
 
     if (uIdx >= 0 && uIdx < allTurns.length) {
       turns.push(allTurns[uIdx]);
-      htmlBodies.push(allEls[uIdx]?.outerHTML ?? '');
+      htmlBodies.push(cloneWithoutInjected(allEls[uIdx]).outerHTML);
     }
 
     for (let j = uIdx + 1; j < nextU; j++) {
       if (j >= 0 && j < allTurns.length) {
         turns.push(allTurns[j]);
-        htmlBodies.push(allEls[j]?.outerHTML ?? '');
+        htmlBodies.push(cloneWithoutInjected(allEls[j]).outerHTML);
       }
     }
   }
