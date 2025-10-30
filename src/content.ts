@@ -447,11 +447,15 @@ function ensureFloatingUI() {
   ensureStyles();
   suspendObservers(true);
   try {
-    let root = document.getElementById(ROOT_ID) as HTMLDivElement | null;
+    const d = document;
+
+    // 1) Root — create if missing
+    let root = d.getElementById(ROOT_ID) as HTMLDivElement | null;
     if (!root) {
-      root = document.createElement('div');
+      root = d.createElement('div');
       root.id = ROOT_ID;
 
+      // Layout & position
       root.style.position = 'fixed';
       root.style.right = '16px';
       root.style.top = '80px';
@@ -465,9 +469,15 @@ function ensureFloatingUI() {
       root.style.gap = '8px';
       root.style.maxWidth = '420px';
 
-      (document.body || document.documentElement).appendChild(root);
+      (d.body || d.documentElement).appendChild(root);
+      // default collapsed state
+      setCollapsed(getInitialCollapsed());
+    }
 
-      const controls = document.createElement('div');
+    // 2) Controls — (re)create if missing
+    let controls = d.getElementById(CONTROLS_ID) as HTMLDivElement | null;
+    if (!controls) {
+      controls = d.createElement('div');
       controls.id = CONTROLS_ID;
       controls.style.display = 'flex';
       controls.style.alignItems = 'center';
@@ -476,27 +486,39 @@ function ensureFloatingUI() {
       controls.style.flexWrap = 'nowrap';
       controls.style.width = '100%';
 
-      const toggleBtn = document.createElement('button');
+      const toggleBtn = d.createElement('button');
       toggleBtn.id = TOGGLE_BTN_ID;
       toggleBtn.type = 'button';
       toggleBtn.textContent = 'Show List';
       toggleBtn.style.fontWeight = '600';
+      toggleBtn.onclick = () => {
+        const isCollapsed = root!.getAttribute('data-collapsed') !== '0';
+        setCollapsed(!isCollapsed);
+      };
 
-      const btnAll = document.createElement('button');
+      const btnAll = d.createElement('button');
       btnAll.id = ALL_BTN_ID;
       btnAll.type = 'button';
       btnAll.textContent = 'All';
+      btnAll.onclick = () => {
+        root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-uindex]').forEach(cb => (cb.checked = true));
+        updateControlsState();
+      };
 
-      const btnNone = document.createElement('button');
+      const btnNone = d.createElement('button');
       btnNone.id = NONE_BTN_ID;
       btnNone.type = 'button';
       btnNone.textContent = 'None';
+      btnNone.onclick = () => {
+        root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-uindex]').forEach(cb => (cb.checked = false));
+        updateControlsState();
+      };
 
-      const pureLabel = document.createElement('label');
+      const pureLabel = d.createElement('label');
       pureLabel.className = 'chatworthy-toggle';
       pureLabel.htmlFor = PURE_MD_CHECKBOX_ID;
 
-      const pureCb = document.createElement('input');
+      const pureCb = d.createElement('input');
       pureCb.type = 'checkbox';
       pureCb.id = PURE_MD_CHECKBOX_ID;
       pureCb.checked = (exportFormat === 'markdown_pure');
@@ -504,49 +526,16 @@ function ensureFloatingUI() {
         setExportFormat(pureCb.checked ? 'markdown_pure' : 'markdown_html');
       });
 
-      const pureSpan = document.createElement('span');
+      const pureSpan = d.createElement('span');
       pureSpan.textContent = 'Pure MD';
 
       pureLabel.appendChild(pureCb);
       pureLabel.appendChild(pureSpan);
 
-      const exportBtn = document.createElement('button');
+      const exportBtn = d.createElement('button');
       exportBtn.id = EXPORT_BTN_ID;
       exportBtn.type = 'button';
       exportBtn.textContent = 'Export';
-
-      controls.appendChild(toggleBtn);
-      controls.appendChild(btnAll);
-      controls.appendChild(btnNone);
-      controls.appendChild(pureLabel);
-      controls.appendChild(exportBtn);
-
-      const list = document.createElement('div');
-      list.id = LIST_ID;
-      list.style.display = 'none';
-      list.style.overflow = 'auto';
-      list.style.maxHeight = '50vh';
-      list.style.minWidth = '220px';
-      list.style.padding = '4px 8px 4px 8px';
-
-      root.appendChild(controls);
-      root.appendChild(list);
-
-      toggleBtn.onclick = () => {
-        const isCollapsed = root!.getAttribute('data-collapsed') !== '0';
-        setCollapsed(!isCollapsed);
-      };
-
-      btnAll.onclick = () => {
-        root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-uindex]').forEach(cb => (cb.checked = true));
-        updateControlsState();
-      };
-
-      btnNone.onclick = () => {
-        root!.querySelectorAll<HTMLInputElement>('input[type="checkbox"][data-uindex]').forEach(cb => (cb.checked = false));
-        updateControlsState();
-      };
-
       exportBtn.onclick = () => {
         try {
           const { turns, htmlBodies } = buildSelectedPayload();
@@ -562,40 +551,69 @@ function ensureFloatingUI() {
         }
       };
 
-      setCollapsed(getInitialCollapsed());
+      controls.appendChild(toggleBtn);
+      controls.appendChild(btnAll);
+      controls.appendChild(btnNone);
+      controls.appendChild(pureLabel);
+      controls.appendChild(exportBtn);
+      root.appendChild(controls);
+
+      // Sync toggle button label with current collapsed state
+      const toggle = controls.querySelector('#' + TOGGLE_BTN_ID) as HTMLButtonElement | null;
+      if (toggle) toggle.textContent = (root.getAttribute('data-collapsed') === '1') ? 'Show List' : 'Hide List';
+    } else {
+      // Make sure toggle text matches state even if controls existed
+      const toggle = controls.querySelector('#' + TOGGLE_BTN_ID) as HTMLButtonElement | null;
+      if (toggle) toggle.textContent = (root.getAttribute('data-collapsed') === '1') ? 'Show List' : 'Hide List';
     }
 
-    const turns = extractTurns();
-    const promptIndexes: number[] = [];
-    turns.forEach((t, i) => { if (t.role === 'user') promptIndexes.push(i); });
+    // 3) List — (re)create if missing
+    let list = d.getElementById(LIST_ID) as HTMLDivElement | null;
+    if (!list) {
+      list = d.createElement('div');
+      list.id = LIST_ID;
+      list.style.display = (root.getAttribute('data-collapsed') === '1') ? 'none' : 'block';
+      list.style.overflow = 'auto';
+      list.style.maxHeight = '50vh';
+      list.style.minWidth = '220px';
+      list.style.padding = '4px 8px 4px 8px';
+      root.appendChild(list);
+    }
 
-    const listEl = document.getElementById(LIST_ID)!;
-    listEl.innerHTML = '';
+    // 4) Populate list from page-side roles (robust even if timing varies)
+    list.innerHTML = '';
+    const allRoleNodes = Array.from(d.querySelectorAll<HTMLElement>('[data-cw-role]'));
+    const userNodes = allRoleNodes.filter(n => n.getAttribute('data-cw-role') === 'user');
 
-    for (const uIdx of promptIndexes) {
-      const item = document.createElement('label');
+    for (const node of userNodes) {
+      const item = d.createElement('label');
       item.className = 'chatworthy-item';
       item.style.display = 'flex';
       item.style.alignItems = 'flex-start';
       item.style.gap = '6px';
       item.style.margin = '4px 0';
 
-      const cb = document.createElement('input');
+      const cb = d.createElement('input');
       cb.type = 'checkbox';
-      cb.dataset.uindex = String(uIdx);
+      const indexInAll = allRoleNodes.indexOf(node); // we export using full stream indexes
+      cb.dataset.uindex = String(indexInAll);
       cb.addEventListener('change', updateControlsState);
 
-      const span = document.createElement('span');
+      const span = d.createElement('span');
       span.className = 'chatworthy-item-text';
-      span.textContent = summarizePromptText((turns[uIdx] as any).text || '');
+      // Sanitize preview (strip our injected labels/hidden nodes)
+      const clone = node.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll('.cw-role-label,[data-cw-hidden="1"]').forEach(n => n.remove());
+      span.textContent = (clone.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
       span.style.lineHeight = '1.2';
 
       item.appendChild(cb);
       item.appendChild(span);
-      listEl.appendChild(item);
+      list.appendChild(item);
     }
 
     updateControlsState();
+    // Keep page labels/typography updated in case new messages arrived
     relabelAndRestyleMessages();
 
   } finally {
