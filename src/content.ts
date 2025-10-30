@@ -1,7 +1,6 @@
 // Mark as a module (good for TS/isolatedModules)
 
 import type { ExportNoteMetadata, ExportTurn } from './types';
-// Format-aware builder (now supports passing per-turn HTML bodies for Pure MD)
 import { buildMarkdownExportByFormat } from './utils/exporters';
 
 /**
@@ -11,6 +10,7 @@ import { buildMarkdownExportByFormat } from './utils/exporters';
  *  - Robust observer for new messages
  *  - Adds a "Pure Markdown" export option (no embedded HTML)
  *  - Relabels "You/ChatGPT" -> "Prompt/Response" and unifies Prompt styling
+ *  - Works even when the page lacks data-message-author-role (uses our own tags)
  * ------------------------------------------------------------
  */
 
@@ -29,7 +29,6 @@ const OBSERVER_THROTTLE_MS = 200;
 const COLLAPSE_LS_KEY = 'chatsworthy:collapsed';
 const FORMAT_LS_KEY = 'chatsworthy:export-format';
 
-// Local union here so you don't need to change your global types immediately.
 type ExportFormat = 'markdown_html' | 'markdown_pure';
 
 // ---- Singleton + Killswitch -------------------------------
@@ -37,7 +36,6 @@ type ExportFormat = 'markdown_html' | 'markdown_pure';
 (() => {
   const w = window as any;
 
-  // Emergency off
   try {
     const disabled =
       localStorage.getItem('chatsworthy:disable') === '1' ||
@@ -48,11 +46,9 @@ type ExportFormat = 'markdown_html' | 'markdown_pure';
     }
   } catch { /* ignore */ }
 
-  // Singleton guard
   if (w.__chatsworthy_init__) return;
   w.__chatsworthy_init__ = true;
 
-  // Skip iframes
   if (window.top !== window) return;
 
   init().catch(err => console.error('[Chatsworthy] init failed', err));
@@ -100,39 +96,76 @@ function getSelectedPromptIndexes(): number[] {
     .sort((a, b) => a - b);
 }
 
+// ---- Message discovery (works with your DOM) ---------------
+
 /**
- * Scrape visible message turns on the page and keep a parallel array of elements.
+ * Returns ordered tuples of { el, role } for visible messages,
+ * tagging each element with data-cw-role="user|assistant" for stable CSS.
+ *
+ * Heuristics based on your sample:
+ * - User: right-aligned container with bubble having .user-message-bubble-color
+ * - Assistant: .markdown.prose blocks (not inside right-aligned user container)
+ * - Also supports legacy [data-message-author-role] if present
  */
-function getAllMessageEls(): HTMLElement[] {
-  return Array.from(document.querySelectorAll<HTMLElement>('[data-message-author-role]'));
-}
+function getMessageTuples(): Array<{ el: HTMLElement; role: 'user' | 'assistant' }> {
+  const out: Array<{ el: HTMLElement; role: 'user' | 'assistant' }> = [];
+  const seen = new WeakSet<Element>();
 
-function extractTurns(): ExportTurn[] {
-  const nodes = getAllMessageEls();
-  const turns: ExportTurn[] = [];
-
-  nodes.forEach((el) => {
-    const role = (el.getAttribute('data-message-author-role') as 'user' | 'assistant' | 'system' | 'tool') ?? 'assistant';
-    const text = (el.textContent ?? '').trim();
-    // We keep text for the legacy exporter; Pure MD will use outerHTML bodies
-    if (text) {
-      turns.push({ role, text });
-    } else {
-      // Still push an empty message to preserve index alignment with DOM list
-      turns.push({ role, text: '' });
+  // USER
+  document.querySelectorAll<HTMLElement>('.user-message-bubble-color').forEach(bubble => {
+    const container = bubble.closest<HTMLElement>('.items-end, [class*="items-end"]');
+    const el = container || bubble;
+    if (el && !seen.has(el)) {
+      seen.add(el);
+      el.setAttribute('data-cw-role', 'user');
+      out.push({ el, role: 'user' });
     }
   });
 
-  return turns;
+  // ASSISTANT
+  document.querySelectorAll<HTMLElement>('.markdown.prose').forEach(md => {
+    if (md.closest('.items-end, [class*="items-end"]')) return; // don't misclassify
+    if (!seen.has(md)) {
+      seen.add(md);
+      md.setAttribute('data-cw-role', 'assistant');
+      out.push({ el: md, role: 'assistant' });
+    }
+  });
+
+  // Legacy support (if page has the old attribute)
+  document.querySelectorAll<HTMLElement>('[data-message-author-role]').forEach(el => {
+    if (seen.has(el)) return;
+    const r = (el.getAttribute('data-message-author-role') || '').toLowerCase();
+    if (r === 'user' || r === 'assistant') {
+      seen.add(el);
+      el.setAttribute('data-cw-role', r);
+      out.push({ el, role: r as 'user' | 'assistant' });
+    }
+  });
+
+  return out;
+}
+
+// ---- Export data building ----------------------------------
+
+function extractTurns(): ExportTurn[] {
+  const tuples = getMessageTuples();
+  return tuples.map(t => ({
+    role: t.role,
+    text: (t.el.textContent ?? '').trim()
+  }));
 }
 
 /**
- * Compute the selected ranges of turns (user turn + following non-user turns until next user).
- * Returns both the ExportTurn[] and a DOM outerHTML[] aligned 1:1 with those turns.
+ * Build selected payload:
+ * - User selects specific user turns; include each selected user turn
+ *   plus all following turns until the next user turn.
  */
 function buildSelectedPayload(): { turns: ExportTurn[]; htmlBodies: string[] } {
-  const allTurns = extractTurns();
-  const allEls = getAllMessageEls();
+  const tuples = getMessageTuples();
+  const allTurns: ExportTurn[] = tuples.map(t => ({ role: t.role, text: (t.el.textContent ?? '').trim() }));
+  const allEls: HTMLElement[] = tuples.map(t => t.el);
+
   const selectedUserIdxs = getSelectedPromptIndexes();
   if (selectedUserIdxs.length === 0) return { turns: [], htmlBodies: [] };
 
@@ -143,13 +176,11 @@ function buildSelectedPayload(): { turns: ExportTurn[]; htmlBodies: string[] } {
     const uIdx = selectedUserIdxs[i];
     const nextU = (i + 1 < selectedUserIdxs.length) ? selectedUserIdxs[i + 1] : allTurns.length;
 
-    // include selected user turn
     if (uIdx >= 0 && uIdx < allTurns.length) {
       turns.push(allTurns[uIdx]);
       htmlBodies.push(allEls[uIdx]?.outerHTML ?? '');
     }
 
-    // include everything after that user turn until the next user turn
     for (let j = uIdx + 1; j < nextU; j++) {
       if (j >= 0 && j < allTurns.length) {
         turns.push(allTurns[j]);
@@ -176,20 +207,13 @@ function updateControlsState() {
   const noneBtn = document.getElementById(NONE_BTN_ID) as HTMLButtonElement | null;
   const expBtn = document.getElementById(EXPORT_BTN_ID) as HTMLButtonElement | null;
 
-  // Disable "All" when all are already selected (and there is at least one)
   if (allBtn) allBtn.disabled = total > 0 && selected === total;
-
-  // Disable "None" when none are selected
   if (noneBtn) noneBtn.disabled = selected === 0;
-
-  // Disable "Export" when none are selected
   if (expBtn) expBtn.disabled = selected === 0;
 }
 
+// ---- Export helpers ---------------------------------------
 
-/**
- * Utility: safe UUID
- */
 function generateNoteId(): string {
   try {
     return `ext-${crypto.randomUUID()}`;
@@ -198,22 +222,17 @@ function generateNoteId(): string {
   }
 }
 
-/**
- * Utility: extract chat ID from the current ChatGPT URL.
- */
 function getChatIdFromUrl(href: string): string | undefined {
   const match = href.match(/\/c\/([a-zA-Z0-9_-]+)/);
   return match?.[1];
 }
-
-// ---- Export Format State -----------------------------------
 
 function getInitialExportFormat(): ExportFormat {
   try {
     const raw = localStorage.getItem(FORMAT_LS_KEY);
     if (raw === 'markdown_pure' || raw === 'markdown_html') return raw;
   } catch { /* ignore */ }
-  return 'markdown_html'; // default to current behavior
+  return 'markdown_html';
 }
 
 let exportFormat: ExportFormat = getInitialExportFormat();
@@ -228,7 +247,7 @@ function buildExportFromTurns(
   subject = '',
   topic = '',
   notes = '',
-  htmlBodies?: string[] // 1:1 with turns (only used for Pure MD)
+  htmlBodies?: string[]
 ): string {
   const meta = {
     noteId: generateNoteId(),
@@ -247,7 +266,7 @@ function buildExportFromTurns(
     autoGenerate: { summary: true, tags: true },
 
     noteMode: 'auto',
-    turnCount: turns.length,   // reflect filtered export, not full page
+    turnCount: turns.length,
     splitHints: [],
 
     author: 'me',
@@ -262,14 +281,11 @@ function buildExportFromTurns(
       title: meta.chatTitle,
       freeformNotes: notes,
       includeFrontMatter: true,
-      htmlBodies // used by Pure MD path
+      htmlBodies
     }
   );
 }
 
-/**
- * Downloads the built markdown file
- */
 function downloadExport(filename: string, data: string | Blob) {
   const blob = data instanceof Blob ? data : new Blob([data], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -293,7 +309,6 @@ function getInitialCollapsed(): boolean {
     if (raw === '0') return false;
     if (raw === '1') return true;
   } catch { /* ignore */ }
-  // Default: collapsed
   return true;
 }
 
@@ -308,40 +323,77 @@ function setCollapsed(v: boolean) {
   if (toggleBtn) toggleBtn.textContent = v ? 'Show List' : 'Hide List';
 }
 
-// ---- Prompt/Response relabel + typography sync -------------
-// Strategy:
-// 1) Detect an assistant message to learn its computed typography.
-// 2) Store those values as CSS variables on <html> so we can reuse them globally.
-// 3) For each user message:
-//    - Inject a standardized label "Prompt" (and "Response" for assistant).
-//    - Apply a class that forces the entire Prompt block to use the assistant typography.
-// 4) For assistant suggestion chips/buttons at the end of a Response, apply the same typography.
+// ---- Relabel + typography sync -----------------------------
+
 function hideNativeRoleLabels(container: HTMLElement) {
-  // Try a few robust selectors ChatGPT commonly uses for the role header.
-  const candidates = [
+  const selectors = [
     '[data-testid="author-name"]',
+    'header [data-testid]',
     'header span, header div',
-    ':scope > div > span', // shallow spans often used in the header
+    ':scope > header *',
+    ':scope > div > span',
+    ':scope > div[role="heading"] *',
   ];
-  for (const sel of candidates) {
+
+  const isRoleWord = (t: string) => {
+    const s = t.trim().toLowerCase();
+    return s === 'you' || s === 'chatgpt';
+  };
+
+  let hidden = 0;
+
+  for (const sel of selectors) {
     container.querySelectorAll<HTMLElement>(sel).forEach(node => {
-      const txt = (node.textContent || '').trim().toLowerCase();
-      if (txt === 'you' || txt === 'chatgpt') {
+      const txt = (node.textContent || '').trim();
+      if (isRoleWord(txt)) {
         node.style.display = 'none';
         node.setAttribute('data-cw-hidden', '1');
+        hidden++;
       }
     });
+  }
+
+  if (!hidden) {
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT, null);
+    let count = 0;
+    while (walker.nextNode() && count < 150) {
+      const el = walker.currentNode as HTMLElement;
+      const txt = (el.textContent || '').trim();
+      if (txt && txt.length <= 16 && isRoleWord(txt)) {
+        el.style.display = 'none';
+        el.setAttribute('data-cw-hidden', '1');
+        hidden++;
+        break;
+      }
+      count++;
+    }
+  }
+
+  if (!hidden) {
+    const prev = container.previousElementSibling as HTMLElement | null;
+    if (prev && /header/i.test(prev.tagName)) {
+      prev.querySelectorAll<HTMLElement>('span,div,[data-testid]').forEach(node => {
+        const txt = (node.textContent || '').trim();
+        if ((txt.toLowerCase() === 'you' || txt.toLowerCase() === 'chatgpt')) {
+          node.style.display = 'none';
+          node.setAttribute('data-cw-hidden', '1');
+          hidden++;
+        }
+      });
+    }
   }
 }
 
 function syncAssistantTypographyVars() {
-  // Prefer a rich content child inside the first assistant message
-  const assistantEl =
-    document.querySelector<HTMLElement>('[data-message-author-role="assistant"] .markdown') ||
-    document.querySelector<HTMLElement>('[data-message-author-role="assistant"]');
-  if (!assistantEl) return;
+  // Prefer a rich content node from our tuples
+  const tuples = getMessageTuples();
+  const firstAssistant = tuples.find(t => t.role === 'assistant')?.el
+    || document.querySelector<HTMLElement>('.markdown.prose')
+    || document.querySelector<HTMLElement>('[data-message-author-role="assistant"]');
 
-  const cs = getComputedStyle(assistantEl);
+  if (!firstAssistant) return;
+
+  const cs = getComputedStyle(firstAssistant);
   const root = document.documentElement;
 
   root.style.setProperty('--cw-assistant-font-family', cs.fontFamily || 'inherit');
@@ -354,29 +406,22 @@ function syncAssistantTypographyVars() {
 function relabelAndRestyleMessages() {
   syncAssistantTypographyVars();
 
-  const messages = getAllMessageEls();
+  const tuples = getMessageTuples();
 
-  for (const el of messages) {
-    if (el.hasAttribute('data-cw-processed')) continue;
-
-    // Hide the native "You/ChatGPT" label if present
+  for (const { el, role } of tuples) {
+    // Try to hide native labels (harmless if none)
     hideNativeRoleLabels(el);
 
-    const role = el.getAttribute('data-message-author-role');
-    const isUser = role === 'user';
-    const isAssistant = role === 'assistant';
+    if (el.hasAttribute('data-cw-processed')) continue;
 
     // Insert our consistent label
     const header = document.createElement('div');
     header.className = 'cw-role-label';
-    header.textContent = isUser ? 'Prompt' : (isAssistant ? 'Response' : (role || 'Message'));
+    header.textContent = role === 'user' ? 'Prompt' : 'Response';
     el.prepend(header);
 
-    // Unify entire Prompt body to assistant typography
-    if (isUser) el.classList.add('cw-unify-to-assistant');
-
-    // Normalize assistant suggestions
-    if (isAssistant) el.classList.add('cw-assistant-normalize-suggestions');
+    if (role === 'user') el.classList.add('cw-unify-to-assistant');
+    if (role === 'assistant') el.classList.add('cw-assistant-normalize-suggestions');
 
     el.setAttribute('data-cw-processed', '1');
   }
@@ -388,13 +433,11 @@ function ensureFloatingUI() {
   ensureStyles();
   suspendObservers(true);
   try {
-    // Create root once
     let root = document.getElementById(ROOT_ID) as HTMLDivElement | null;
     if (!root) {
       root = document.createElement('div');
       root.id = ROOT_ID;
 
-      // Layout & position
       root.style.position = 'fixed';
       root.style.right = '16px';
       root.style.top = '80px';
@@ -410,14 +453,13 @@ function ensureFloatingUI() {
 
       (document.body || document.documentElement).appendChild(root);
 
-      // Controls (row)
       const controls = document.createElement('div');
       controls.id = CONTROLS_ID;
       controls.style.display = 'flex';
       controls.style.alignItems = 'center';
-      controls.style.justifyContent = 'flex-end'; // right-justify buttons
+      controls.style.justifyContent = 'flex-end';
       controls.style.gap = '6px';
-      controls.style.flexWrap = 'nowrap';         // single line
+      controls.style.flexWrap = 'nowrap';
       controls.style.width = '100%';
 
       const toggleBtn = document.createElement('button');
@@ -436,7 +478,6 @@ function ensureFloatingUI() {
       btnNone.type = 'button';
       btnNone.textContent = 'None';
 
-      // Pure Markdown checkbox (persists via localStorage)
       const pureLabel = document.createElement('label');
       pureLabel.className = 'chatworthy-toggle';
       pureLabel.htmlFor = PURE_MD_CHECKBOX_ID;
@@ -466,19 +507,17 @@ function ensureFloatingUI() {
       controls.appendChild(pureLabel);
       controls.appendChild(exportBtn);
 
-      // List (below controls)
       const list = document.createElement('div');
       list.id = LIST_ID;
-      list.style.display = 'none';               // collapsed by default
+      list.style.display = 'none';
       list.style.overflow = 'auto';
       list.style.maxHeight = '50vh';
       list.style.minWidth = '220px';
-      list.style.padding = '4px 8px 4px 8px'; // room for focus ring on the left
+      list.style.padding = '4px 8px 4px 8px';
 
       root.appendChild(controls);
       root.appendChild(list);
 
-      // Wire up controls
       toggleBtn.onclick = () => {
         const isCollapsed = root!.getAttribute('data-collapsed') !== '0';
         setCollapsed(!isCollapsed);
@@ -509,16 +548,12 @@ function ensureFloatingUI() {
         }
       };
 
-      // Initialize collapsed/expanded state
       setCollapsed(getInitialCollapsed());
     }
 
-    // Update list
     const turns = extractTurns();
     const promptIndexes: number[] = [];
-    turns.forEach((t, i) => {
-      if (t.role === 'user') promptIndexes.push(i);
-    });
+    turns.forEach((t, i) => { if (t.role === 'user') promptIndexes.push(i); });
 
     const listEl = document.getElementById(LIST_ID)!;
     listEl.innerHTML = '';
@@ -547,8 +582,6 @@ function ensureFloatingUI() {
     }
 
     updateControlsState();
-
-    // Apply relabel + restyle after UI settles
     relabelAndRestyleMessages();
 
   } finally {
@@ -563,36 +596,67 @@ function ensureStyles() {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-/* Our injected label matches assistant label styling */
-[data-message-author-role] > .cw-role-label {
-  font-family: var(--cw-assistant-font-family, inherit) !important;
-  font-size: var(--cw-assistant-font-size, inherit) !important;
-  line-height: var(--cw-assistant-line-height, 1.2) !important;
-  font-weight: 600 !important;
-  color: var(--cw-assistant-color, rgba(0,0,0,0.75)) !important;
-  margin-bottom: 6px !important;
-}
+    /* Floating UI buttons */
+    #${ROOT_ID} button {
+      padding: 4px 8px;
+      border: 1px solid rgba(0,0,0,0.2);
+      border-radius: 6px;
+      background: white;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+    #${ROOT_ID} button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      filter: grayscale(100%);
+    }
+    #${ROOT_ID} .chatworthy-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.2;
+      margin-left: 4px;
+      white-space: nowrap;
+    }
+    #${ROOT_ID} .chatworthy-toggle input {
+      transform: translateY(0.5px);
+    }
+    #${ROOT_ID} label.chatworthy-item input[type="checkbox"] {
+      margin-left: 2px;
+    }
 
-/* Entire Prompt (user) body uses assistant typography */
-[data-message-author-role="user"].cw-unify-to-assistant,
-[data-message-author-role="user"].cw-unify-to-assistant * {
-  font-family: var(--cw-assistant-font-family, inherit) !important;
-  font-size: var(--cw-assistant-font-size, inherit) !important;
-  line-height: var(--cw-assistant-line-height, inherit) !important;
-  color: var(--cw-assistant-color, inherit) !important;
-  font-weight: var(--cw-assistant-font-weight, inherit) !important;
-}
+    /* Injected role label (Prompt/Response) styled like assistant label */
+    [data-cw-role] > .cw-role-label {
+      font-family: var(--cw-assistant-font-family, inherit) !important;
+      font-size: var(--cw-assistant-font-size, inherit) !important;
+      line-height: var(--cw-assistant-line-height, 1.2) !important;
+      font-weight: 600 !important;
+      color: var(--cw-assistant-color, rgba(0,0,0,0.75)) !important;
+      margin-bottom: 6px !important;
+    }
 
-/* Suggestion chips in Responses also match */
-[data-message-author-role="assistant"].cw-assistant-normalize-suggestions button,
-[data-message-author-role="assistant"].cw-assistant-normalize-suggestions a[role="button"],
-[data-message-author-role="assistant"].cw-assistant-normalize-suggestions [data-testid*="suggestion"] {
-  font-family: var(--cw-assistant-font-family, inherit) !important;
-  font-size: var(--cw-assistant-font-size, inherit) !important;
-  line-height: var(--cw-assistant-line-height, inherit) !important;
-  color: var(--cw-assistant-color, inherit) !important;
-  font-weight: var(--cw-assistant-font-weight, inherit) !important;
-}
+    /* Entire Prompt (user) body uses assistant typography */
+    [data-cw-role="user"].cw-unify-to-assistant,
+    [data-cw-role="user"].cw-unify-to-assistant * {
+      font-family: var(--cw-assistant-font-family, inherit) !important;
+      font-size: var(--cw-assistant-font-size, inherit) !important;
+      line-height: var(--cw-assistant-line-height, inherit) !important;
+      color: var(--cw-assistant-color, inherit) !important;
+      font-weight: var(--cw-assistant-font-weight, inherit) !important;
+    }
+
+    /* Suggestion chips in Responses also match assistant typography */
+    [data-cw-role="assistant"].cw-assistant-normalize-suggestions button,
+    [data-cw-role="assistant"].cw-assistant-normalize-suggestions a[role="button"],
+    [data-cw-role="assistant"].cw-assistant-normalize-suggestions [data-testid*="suggestion"] {
+      font-family: var(--cw-assistant-font-family, inherit) !important;
+      font-size: var(--cw-assistant-font-size, inherit) !important;
+      line-height: var(--cw-assistant-line-height, inherit) !important;
+      color: var(--cw-assistant-color, inherit) !important;
+      font-weight: var(--cw-assistant-font-weight, inherit) !important;
+    }
   `;
   (document.head || document.documentElement).appendChild(style);
 }
@@ -604,9 +668,7 @@ let observersSuspended = false;
 let lastObserverRun = 0;
 let scheduled = false;
 
-function suspendObservers(v: boolean) {
-  observersSuspended = v;
-}
+function suspendObservers(v: boolean) { observersSuspended = v; }
 
 function makeObserver(): MutationObserver {
   return new MutationObserver((mutationList) => {
@@ -616,7 +678,7 @@ function makeObserver(): MutationObserver {
     if (root) {
       for (const m of mutationList) {
         const target = m.target as Node;
-        if (root.contains(target)) return;
+        if (root.contains(target)) return; // ignore our own UI mutations
       }
     }
 
@@ -647,7 +709,6 @@ function scheduleEnsure() {
     const run = () => {
       scheduled = false;
       ensureFloatingUI();
-      // Also keep our relabel/restyle current as the DOM evolves
       relabelAndRestyleMessages();
     };
     if ('requestIdleCallback' in window) {
