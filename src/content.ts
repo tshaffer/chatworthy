@@ -526,36 +526,39 @@ function normalizeSuggestionChips(el: HTMLElement) {
 }
 
 function relabelAndRestyleMessages() {
-  // Make sure vars are current (reads from a live assistant node)
   syncAssistantTypographyVars();
-
   const tuples = getMessageTuples();
 
   for (const { el, role } of tuples) {
-    // Hide native labels if present
     hideNativeRoleLabels(el);
 
-    // Insert our consistent label once
-    let header = el.querySelector(':scope > .cw-role-label') as HTMLDivElement | null;
-    if (!header) {
-      header = document.createElement('div');
-      header.className = 'cw-role-label';
-      header.textContent = role === 'user' ? 'Prompt' : 'Response';
-      el.prepend(header);
+    // Insert our label once
+    let label = el.querySelector(':scope > .cw-role-label') as HTMLDivElement | null;
+    if (!label) {
+      label = document.createElement('div');
+      label.className = 'cw-role-label';
+      label.textContent = role === 'user' ? 'Prompt' : 'Response';
+      el.prepend(label);
     }
 
-    // FORCE the label to the assistant typography inline (wins over any host !important)
-    applyAssistantTypographyInline(header);
-
-    // Mark classes for CSS (kept for future), but also force inline where needed
     if (role === 'user') {
+      // Wrap all non-label children in a sandbox that wipes host styles
+      let sandbox = el.querySelector(':scope > .cw-typo-sandbox') as HTMLDivElement | null;
+      if (!sandbox) {
+        sandbox = document.createElement('div');
+        sandbox.className = 'cw-typo-sandbox';
+
+        // move every sibling after the label into the sandbox
+        const toMove: ChildNode[] = [];
+        for (let n = label.nextSibling; n; n = n.nextSibling) toMove.push(n);
+        toMove.forEach(n => sandbox.appendChild(n));
+
+        el.appendChild(sandbox);
+      }
+
       el.classList.add('cw-unify-to-assistant');
-      // Force the entire Prompt body inline to match assistant typography
-      applyAssistantTypographyInline(el);
     } else {
       el.classList.add('cw-assistant-normalize-suggestions');
-      // Normalize suggestion chips/buttons at the end of Responses
-      normalizeSuggestionChips(el);
     }
 
     el.setAttribute('data-cw-processed', '1');
@@ -843,6 +846,71 @@ function ensureStyles() {
     line-height: var(--cw-assistant-line-height) !important;
     color: var(--cw-assistant-color) !important;
     font-weight: var(--cw-assistant-font-weight) !important;
+  }
+
+  /* Typography sandbox that zeroes out host styles, then reapplies assistant look */
+  .cw-typo-sandbox {
+    /* wipe inherited UA + host styles */
+    all: unset !important;
+    display: block !important;
+
+    /* reapply assistant variables as the new inheritance root */
+    font-family: var(--cw-assistant-font-family) !important;
+    font-size:   var(--cw-assistant-font-size)   !important;
+    line-height: var(--cw-assistant-line-height) !important;
+    font-weight: var(--cw-assistant-font-weight) !important;
+    color:       var(--cw-assistant-color)       !important;
+  }
+
+  /* children inherit from the sandbox; only ensure they don't reintroduce host text styles */
+  .cw-typo-sandbox * {
+    all: unset !important;
+    display: revert !important;         /* keep normal flow for common tags */
+    font: inherit !important;           /* inherit the assistant font stack, size, weight */
+    line-height: inherit !important;
+    color: inherit !important;
+    white-space: revert !important;     /* keep paragraphs behaving like text */
+  }
+
+  /* headings & lists still need structure restored */
+  .cw-typo-sandbox p,
+  .cw-typo-sandbox div { display: block !important; }
+  .cw-typo-sandbox h1,
+  .cw-typo-sandbox h2,
+  .cw-typo-sandbox h3,
+  .cw-typo-sandbox h4,
+  .cw-typo-sandbox h5,
+  .cw-typo-sandbox h6 { display:block!important; font-weight:600!important; margin:0 0 .25rem 0!important; }
+  .cw-typo-sandbox ul,
+  .cw-typo-sandbox ol { display:block!important; padding-left:1.25rem!important; margin:.25rem 0!important; }
+  .cw-typo-sandbox li { display:list-item!important; }
+
+  /* label spacing */
+  [data-cw-role] > .cw-role-label {
+    display:block !important;
+    margin: 0 0 6px 0 !important;
+    font-weight:600 !important;
+  }
+
+  /* suggestion chips (assistant “ideas” at end) */
+  .cw-assistant-normalize-suggestions button,
+  .cw-assistant-normalize-suggestions a[role="button"],
+  .cw-assistant-normalize-suggestions [data-testid*="suggest"],
+  .cw-assistant-normalize-suggestions [data-testid*="quick"] {
+    all: unset !important;
+    display:inline-flex!important;
+    align-items:center!important;
+    gap:.25rem!important;
+    padding:.25rem .5rem!important;
+    border-radius:.5rem!important;
+    border:1px solid rgba(0,0,0,.12)!important;
+    cursor:pointer!important;
+
+    font-family: var(--cw-assistant-font-family) !important;
+    font-size:   var(--cw-assistant-font-size)   !important;
+    line-height: var(--cw-assistant-line-height) !important;
+    font-weight: var(--cw-assistant-font-weight) !important;
+    color:       var(--cw-assistant-color)       !important;
   }
 
   `;
