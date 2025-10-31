@@ -76,9 +76,9 @@ export function toMarkdownWithFrontMatter(
 
 // ---------------- Shared helpers ----------------
 
-function roleLabel(role: ExportTurn['role']): 'You' | 'ChatGPT' | 'System' | 'Tool' {
-  if (role === 'user') return 'You';
-  if (role === 'assistant') return 'ChatGPT';
+function roleLabel(role: ExportTurn['role']): 'Prompt' | 'Response' | 'System' | 'Tool' {
+  if (role === 'user') return 'Prompt';
+  if (role === 'assistant') return 'Response';
   if (role === 'system') return 'System';
   return 'Tool';
 }

@@ -135,37 +135,45 @@ function getMessageTuples(): Array<{ el: HTMLElement; role: 'user' | 'assistant'
   const out: Array<{ el: HTMLElement; role: 'user' | 'assistant' }> = [];
   const seen = new WeakSet<Element>();
 
-  // USER
-  document.querySelectorAll<HTMLElement>('.user-message-bubble-color').forEach(bubble => {
-    const container = bubble.closest<HTMLElement>('.items-end, [class*="items-end"]');
-    const el = container || bubble;
-    if (el && !seen.has(el)) {
-      seen.add(el);
-      el.setAttribute('data-cw-role', 'user');
-      out.push({ el, role: 'user' });
-    }
-  });
+  // Query in DOM order (one pass), then classify each node.
+  const nodes = Array.from(document.querySelectorAll<HTMLElement>(
+    '.user-message-bubble-color, .markdown.prose, [data-message-author-role]'
+  ));
 
-  // ASSISTANT
-  document.querySelectorAll<HTMLElement>('.markdown.prose').forEach(md => {
-    if (md.closest('.items-end, [class*="items-end"]')) return; // don't misclassify
-    if (!seen.has(md)) {
-      seen.add(md);
-      md.setAttribute('data-cw-role', 'assistant');
-      out.push({ el: md, role: 'assistant' });
+  for (const node of nodes) {
+    // Prefer explicit page-side tags if present
+    if (node.hasAttribute('data-message-author-role')) {
+      const r = (node.getAttribute('data-message-author-role') || '').toLowerCase();
+      if ((r === 'user' || r === 'assistant') && !seen.has(node)) {
+        seen.add(node);
+        node.setAttribute('data-cw-role', r);
+        out.push({ el: node, role: r as 'user' | 'assistant' });
+        continue;
+      }
     }
-  });
 
-  // Legacy support (if page has the old attribute)
-  document.querySelectorAll<HTMLElement>('[data-message-author-role]').forEach(el => {
-    if (seen.has(el)) return;
-    const r = (el.getAttribute('data-message-author-role') || '').toLowerCase();
-    if (r === 'user' || r === 'assistant') {
-      seen.add(el);
-      el.setAttribute('data-cw-role', r);
-      out.push({ el, role: r as 'user' | 'assistant' });
+    // Detect user container (right-aligned bubble)
+    if (node.matches('.user-message-bubble-color')) {
+      const container = node.closest<HTMLElement>('.items-end, [class*="items-end"]') || node;
+      if (!seen.has(container)) {
+        seen.add(container);
+        container.setAttribute('data-cw-role', 'user');
+        out.push({ el: container, role: 'user' });
+      }
+      continue;
     }
-  });
+
+    // Detect assistant markdown (avoid user container)
+    if (node.matches('.markdown.prose')) {
+      if (node.closest('.items-end, [class*="items-end"]')) continue; // don't misclassify
+      if (!seen.has(node)) {
+        seen.add(node);
+        node.setAttribute('data-cw-role', 'assistant');
+        out.push({ el: node, role: 'assistant' });
+      }
+      continue;
+    }
+  }
 
   return out;
 }
