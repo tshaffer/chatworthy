@@ -493,43 +493,72 @@ function syncAssistantTypographyVars() {
   root.style.setProperty('--cw-assistant-color', cs.color || 'inherit');
 }
 
+function applyAssistantTypographyInline(el: HTMLElement) {
+  const root = document.documentElement;
+  const ff = getComputedStyle(root).getPropertyValue('--cw-assistant-font-family') || '';
+  const fs = getComputedStyle(root).getPropertyValue('--cw-assistant-font-size') || '';
+  const lh = getComputedStyle(root).getPropertyValue('--cw-assistant-line-height') || '';
+  const fw = getComputedStyle(root).getPropertyValue('--cw-assistant-font-weight') || '';
+  const c = getComputedStyle(root).getPropertyValue('--cw-assistant-color') || '';
+
+  // Apply to the root
+  el.style.setProperty('fontFamily', ff.trim(), 'important');
+  el.style.setProperty('fontSize', fs.trim(), 'important');
+  el.style.setProperty('lineHeight', lh.trim(), 'important');
+  el.style.setProperty('fontWeight', fw.trim(), 'important');
+  el.style.setProperty('color', c.trim(), 'important');
+
+  // Apply deeply to common text nodes inside (pre/code too)
+  el.querySelectorAll<HTMLElement>('p, div, li, span, a, button, pre, code, h1, h2, h3, h4, h5, h6').forEach(n => {
+    n.style.setProperty('fontFamily', ff.trim(), 'important');
+    n.style.setProperty('fontSize', fs.trim(), 'important');
+    n.style.setProperty('lineHeight', lh.trim(), 'important');
+    n.style.setProperty('fontWeight', fw.trim(), 'important');
+    n.style.setProperty('color', c.trim(), 'important');
+  });
+}
+
+function normalizeSuggestionChips(el: HTMLElement) {
+  // Hit anything that looks like a suggestion/quick reply chip near the end of an assistant turn
+  el.querySelectorAll<HTMLElement>('button, a[role="button"], [data-testid*="suggest"], [data-testid*="quick"]').forEach(n => {
+    applyAssistantTypographyInline(n);
+  });
+}
+
 function relabelAndRestyleMessages() {
+  // Make sure vars are current (reads from a live assistant node)
   syncAssistantTypographyVars();
 
   const tuples = getMessageTuples();
+
   for (const { el, role } of tuples) {
     // Hide native labels if present
     hideNativeRoleLabels(el);
 
-    // Add/refresh our normalization classes every pass
-    // if (role === 'user') el.classList.add('cw-unify-to-assistant');
-    // if (role === 'assistant') el.classList.add('cw-assistant-normalize-suggestions');
-    if (role === 'user') {
-      el.classList.add('cw-unify-to-assistant');
-      forcePromptTypography(el); // 🔥 hard-pin Prompt body appearance
-    } else {
-      el.classList.add('cw-assistant-normalize-suggestions');
-    }
-
-    // Inject a single label at the top (once)
-    if (!el.querySelector(':scope > .cw-role-label')) {
-      // Insert our consistent label
-      // Insert our consistent label
-      const header = document.createElement('div');
+    // Insert our consistent label once
+    let header = el.querySelector(':scope > .cw-role-label') as HTMLDivElement | null;
+    if (!header) {
+      header = document.createElement('div');
       header.className = 'cw-role-label';
       header.textContent = role === 'user' ? 'Prompt' : 'Response';
-
-      // 🔧 Inline + !important to beat utility classes
-      const setImp = (prop: string, val: string) => header.style.setProperty(prop, val, 'important');
-      setImp('font-family', 'var(--cw-assistant-font-family)');
-      setImp('font-size', 'var(--cw-assistant-font-size)');
-      setImp('line-height', 'var(--cw-assistant-line-height)');
-      setImp('font-weight', '600'); // label semibold
-      setImp('color', 'var(--cw-assistant-color)');
-      setImp('margin-bottom', '6px');
-
       el.prepend(header);
     }
+
+    // FORCE the label to the assistant typography inline (wins over any host !important)
+    applyAssistantTypographyInline(header);
+
+    // Mark classes for CSS (kept for future), but also force inline where needed
+    if (role === 'user') {
+      el.classList.add('cw-unify-to-assistant');
+      // Force the entire Prompt body inline to match assistant typography
+      applyAssistantTypographyInline(el);
+    } else {
+      el.classList.add('cw-assistant-normalize-suggestions');
+      // Normalize suggestion chips/buttons at the end of Responses
+      normalizeSuggestionChips(el);
+    }
+
+    el.setAttribute('data-cw-processed', '1');
   }
 }
 
@@ -815,11 +844,17 @@ function ensureStyles() {
     color: var(--cw-assistant-color) !important;
     font-weight: var(--cw-assistant-font-weight) !important;
   }
-`;
+
+  `;
   (document.head || document.documentElement).appendChild(style);
 
 }
-
+/*
+  [data-cw-role] > .cw-role-label {
+    display: block !important;
+    margin: 0 0 6px 0 !important;
+  }
+*/
 // ---- Observer + scheduling ---------------------------------
 
 let mo: MutationObserver | null = null;
