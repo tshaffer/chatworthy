@@ -64,6 +64,17 @@ function startRepairLoop() {
 
   if (w.__chatworthy_init__) return;
   w.__chatworthy_init__ = true;
+  // Expose for quick console debugging
+  (window as any).cw_getMessageTuples = getMessageTuples;
+
+  // Paste once near other singletons:
+  (window as any).cw_debugTuples = () => {
+    const t = getMessageTuples();
+    const users = t.filter(x => x.role === 'user').length;
+    const asst = t.filter(x => x.role === 'assistant').length;
+    console.log(`[chatworthy] tuples: ${t.length} (user=${users}, assistant=${asst})`);
+    console.log(t.map((x, i) => ({ i, role: x.role, text: (x.el.textContent || '').trim().slice(0, 60) })));
+  };
 
   if (window.top !== window) return;
 
@@ -132,50 +143,77 @@ function cloneWithoutInjected(el: HTMLElement): HTMLElement {
  * - Also supports legacy [data-message-author-role] if present
  */
 function getMessageTuples(): Array<{ el: HTMLElement; role: 'user' | 'assistant' }> {
-  const out: Array<{ el: HTMLElement; role: 'user' | 'assistant' }> = [];
-  const seen = new WeakSet<Element>();
+  const chosen: Array<{ el: HTMLElement; role: 'user' | 'assistant' }> = [];
+  const seen = new Set<HTMLElement>();
 
-  // Query in DOM order (one pass), then classify each node.
-  const nodes = Array.from(document.querySelectorAll<HTMLElement>(
-    '.user-message-bubble-color, .markdown.prose, [data-message-author-role]'
-  ));
+  // Prefer full "turn" containers; fall back to nodes that carry the role attribute.
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>([
+    '[data-testid="conversation-turn"]',
+    '[data-message-id]',
+    '[data-message-author-role]'
+  ].join(',')));
 
-  for (const node of nodes) {
-    // Prefer explicit page-side tags if present
-    if (node.hasAttribute('data-message-author-role')) {
-      const r = (node.getAttribute('data-message-author-role') || '').toLowerCase();
-      if ((r === 'user' || r === 'assistant') && !seen.has(node)) {
-        seen.add(node);
-        node.setAttribute('data-cw-role', r);
-        out.push({ el: node, role: r as 'user' | 'assistant' });
-        continue;
-      }
+  // Pick a stable root for a candidate node.
+  const pickRoot = (n: HTMLElement): HTMLElement =>
+    n.closest<HTMLElement>('[data-testid="conversation-turn"]')
+    || n.closest<HTMLElement>('[data-message-id]')
+    || n.closest<HTMLElement>('article, li, section')
+    || n;
+
+  // Decide role from attributes/content inside a root.
+  const roleOf = (root: HTMLElement): 'user' | 'assistant' => {
+    // 1) Explicit attribute wins.
+    const attrNode = root.matches('[data-message-author-role]')
+      ? root
+      : root.querySelector<HTMLElement>('[data-message-author-role]');
+    const raw = (attrNode?.getAttribute('data-message-author-role') || '').toLowerCase();
+    if (raw === 'user' || raw === 'assistant') return raw as 'user' | 'assistant';
+
+    // 2) Common UI clues.
+    if (root.querySelector('.user-message-bubble-color')) return 'user';
+
+    // 3) Fallback: if there’s a right-aligned container, assume user.
+    if (root.matches('.items-end, [class*="items-end"]') || root.querySelector('.items-end, [class*="items-end"]')) {
+      return 'user';
     }
 
-    // Detect user container (right-aligned bubble)
-    if (node.matches('.user-message-bubble-color')) {
-      const container = node.closest<HTMLElement>('.items-end, [class*="items-end"]') || node;
-      if (!seen.has(container)) {
-        seen.add(container);
-        container.setAttribute('data-cw-role', 'user');
-        out.push({ el: container, role: 'user' });
-      }
-      continue;
-    }
+    // 4) Default to assistant.
+    return 'assistant';
+  };
 
-    // Detect assistant markdown (avoid user container)
-    if (node.matches('.markdown.prose')) {
-      if (node.closest('.items-end, [class*="items-end"]')) continue; // don't misclassify
-      if (!seen.has(node)) {
-        seen.add(node);
-        node.setAttribute('data-cw-role', 'assistant');
-        out.push({ el: node, role: 'assistant' });
+  for (const node of candidates) {
+    const root = pickRoot(node);
+    if (seen.has(root)) continue;
+    seen.add(root);
+
+    const role = roleOf(root);
+    root.setAttribute('data-cw-role', role);
+
+    if (!root.hasAttribute('data-cw-msgid')) {
+      root.setAttribute('data-cw-msgid', String(chosen.length));
+    }
+    chosen.push({ el: root, role });
+  }
+
+  // As a safety net: if we somehow found no assistant nodes but there are visible assistant blocks,
+  // sweep for rich content containers not inside user turns.
+  if (!chosen.some(c => c.role === 'assistant')) {
+    const extras = Array.from(document.querySelectorAll<HTMLElement>('.markdown, .prose, [data-testid="markdown"]'));
+    for (const md of extras) {
+      const inUser = md.closest('[data-cw-role="user"], .items-end, [class*="items-end"]');
+      if (inUser) continue;
+      const root = pickRoot(md);
+      if (seen.has(root)) continue;
+      seen.add(root);
+      root.setAttribute('data-cw-role', 'assistant');
+      if (!root.hasAttribute('data-cw-msgid')) {
+        root.setAttribute('data-cw-msgid', String(chosen.length));
       }
-      continue;
+      chosen.push({ el: root, role: 'assistant' });
     }
   }
 
-  return out;
+  return chosen;
 }
 
 // ---- Export data building ----------------------------------
@@ -197,33 +235,46 @@ function extractTurns(): ExportTurn[] {
  *   plus all following turns until the next user turn.
  */
 function buildSelectedPayload(): { turns: ExportTurn[]; htmlBodies: string[] } {
-  const tuples = getMessageTuples();
+  // Canonical list of message roots in visual order
+  const tuples = getMessageTuples(); // [{ el: HTMLElement, role: 'user'|'assistant' }]
+  const allEls: HTMLElement[] = tuples.map(t => t.el);
   const allTurns: ExportTurn[] = tuples.map(t => {
     const clean = cloneWithoutInjected(t.el);
     return { role: t.role, text: (clean.textContent ?? '').trim() };
   });
-  const allEls: HTMLElement[] = tuples.map(t => t.el);
 
-  const selectedUserIdxs = getSelectedPromptIndexes();
-  if (selectedUserIdxs.length === 0) return { turns: [], htmlBodies: [] };
+  // Selected indices come from user checkboxes whose data-uindex === data-cw-msgid (overall tuple index)
+  const raw = getSelectedPromptIndexes(); // string[] | number[] depending on your impl
+  let selected = raw
+    .map(n => typeof n === 'string' ? parseInt(n, 10) : Number(n))
+    .filter(n => Number.isFinite(n))
+    .filter((n, i, arr) => arr.indexOf(n) === i) // de-dupe
+    .sort((a, b) => a - b);
+
+  // Keep only valid, in-range indices that point to a USER turn (defensive)
+  selected = selected.filter(idx => idx >= 0 && idx < allTurns.length && allTurns[idx].role === 'user');
+
+  if (selected.length === 0) return { turns: [], htmlBodies: [] };
 
   const turns: ExportTurn[] = [];
   const htmlBodies: string[] = [];
 
-  for (let i = 0; i < selectedUserIdxs.length; i++) {
-    const uIdx = selectedUserIdxs[i];
-    const nextU = (i + 1 < selectedUserIdxs.length) ? selectedUserIdxs[i + 1] : allTurns.length;
+  // For each selected user index, include that user turn and all following turns
+  // up to (but not including) the next selected user index (or the end).
+  for (let i = 0; i < selected.length; i++) {
+    const uIdx = selected[i];
+    const nextCut = (i + 1 < selected.length) ? selected[i + 1] : allTurns.length;
 
-    if (uIdx >= 0 && uIdx < allTurns.length) {
-      turns.push(allTurns[uIdx]);
-      htmlBodies.push(cloneWithoutInjected(allEls[uIdx]).outerHTML);
-    }
+    // Guard against accidental inversion (shouldn't happen after sort, but be safe)
+    const start = Math.max(0, Math.min(uIdx, allTurns.length));
+    const end = Math.max(start + 1, Math.min(nextCut, allTurns.length));
 
-    for (let j = uIdx + 1; j < nextU; j++) {
-      if (j >= 0 && j < allTurns.length) {
-        turns.push(allTurns[j]);
-        htmlBodies.push(cloneWithoutInjected(allEls[j]).outerHTML);
-      }
+    for (let j = start; j < end; j++) {
+      // Clone without our injected UI and grab HTML/text
+      const el = allEls[j];
+      const cleanEl = cloneWithoutInjected(el);
+      turns.push(allTurns[j]);
+      htmlBodies.push(cleanEl.outerHTML);
     }
   }
 
@@ -599,38 +650,55 @@ function ensureFloatingUI() {
       root.appendChild(list);
     }
 
-    // 4) Populate list from page-side roles (robust)
+    // 🔑 Make sure roles/labels are in place BEFORE we build the list
+    relabelAndRestyleMessages();
+
+    // 4) Populate list from tuples (don’t depend on [data-cw-role] being there yet)
     list.innerHTML = '';
-    const allRoleNodes = Array.from(d.querySelectorAll<HTMLElement>('[data-cw-role]'));
-    const userNodes = allRoleNodes.filter(n => n.getAttribute('data-cw-role') === 'user');
+    const tuples = getMessageTuples(); // [{ el, role }]
+    const allEls = tuples.map(t => t.el);
 
-    for (const node of userNodes) {
-      const item = d.createElement('label');
-      item.className = 'chatworthy-item';
-      item.style.display = 'flex';
-      item.style.alignItems = 'flex-start';
-      item.style.gap = '6px';
-      item.style.margin = '4px 0';
+    const userTuples: Array<{ idx: number; el: HTMLElement }> = [];
+    tuples.forEach((t, idx) => {
+      if (t.role === 'user') userTuples.push({ idx, el: t.el });
+    });
 
-      const cb = d.createElement('input');
-      cb.type = 'checkbox';
-      const indexInAll = allRoleNodes.indexOf(node);
-      cb.dataset.uindex = String(indexInAll);
-      cb.addEventListener('change', updateControlsState);
+    if (userTuples.length === 0) {
+      const empty = d.createElement('div');
+      empty.textContent = 'No prompts detected yet.';
+      empty.style.opacity = '0.7';
+      empty.style.fontSize = '12px';
+      list.appendChild(empty);
+    } else {
+      for (const { idx, el: node } of userTuples) {
+        const item = d.createElement('label');
+        item.className = 'chatworthy-item';
+        item.style.display = 'flex';
+        item.style.alignItems = 'flex-start';
+        item.style.gap = '6px';
+        item.style.margin = '4px 0';
 
-      const span = d.createElement('span');
-      span.className = 'chatworthy-item-text';
-      const clone = node.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll('.cw-role-label,[data-cw-hidden="1"]').forEach(n => n.remove());
-      span.textContent = (clone.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
-      span.style.lineHeight = '1.2';
+        const cb = d.createElement('input');
+        cb.type = 'checkbox';
+        // Use the overall tuple index so buildSelectedPayload lines up
+        cb.dataset.uindex = String(idx);
+        cb.addEventListener('change', updateControlsState);
 
-      item.appendChild(cb);
-      item.appendChild(span);
-      list.appendChild(item);
+        const span = d.createElement('span');
+        span.className = 'chatworthy-item-text';
+        const clone = node.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll('.cw-role-label,[data-cw-hidden="1"]').forEach(n => n.remove());
+        span.textContent = (clone.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+        span.style.lineHeight = '1.2';
+
+        item.appendChild(cb);
+        item.appendChild(span);
+        list.appendChild(item);
+      }
     }
 
     updateControlsState();
+
     relabelAndRestyleMessages();
   } finally {
     suspendObservers(false);
