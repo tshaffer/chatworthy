@@ -106,6 +106,37 @@ function renderFrontMatter(meta: ExportNoteMetadata): string {
   return lines.join('\n');
 }
 
+// --- Rendering helpers (Prompt/Response formatting) -----------------
+
+function renderPromptBlockquote(md: string): string {
+  // Render the Prompt label, then quote the entire prompt so it inherits body text styles
+  const text = (md || '').trimEnd();
+  const quoted = text
+    .split('\n')
+    .map((l) => (l.length ? `> ${l}` : '>'))
+    .join('\n');
+  return `**Prompt**\n\n${quoted}`;
+}
+
+function normalizeSuggestionsSection(md: string): string {
+  // 1) Remove HRs which VS Code renders with big margins
+  let out = md.replace(/\n-{3,}\n+/g, '\n\n');
+
+  // 2) Normalize common “Suggestions” headings to a consistent H4
+  out = out.replace(/\n(?:\*\*)?\s*suggestions\s*:?(?:\*\*)?\s*\n/gi, '\n\n#### Suggestions\n');
+
+  // 3) Convert trailing lines that look like chips into bullets (very light-touch)
+  // e.g., lines starting with •, ◦, → become "- "
+  out = out.replace(/^[ \t]*[•◦→]\s+/gm, '- ');
+
+  return out;
+}
+
+function renderResponseSection(md: string): string {
+  const body = (md || '').trimEnd();
+  return `**Response**\n\n${normalizeSuggestionsSection(body)}`;
+}
+
 // ---------------- Turndown (HTML → Markdown) ----------------
 
 const td = new TurndownService({
@@ -213,7 +244,7 @@ function toPureMarkdownChatStyleFromHtml(
     title = meta.chatTitle || 'Chat Export',
     includeFrontMatter = true,
     includeMetaRow = true,
-    hrBetween = true,
+    hrBetween = false, // ← default OFF (no ---)
     freeformNotes,
   } = opts || {};
 
@@ -228,13 +259,19 @@ function toPureMarkdownChatStyleFromHtml(
     out.push('');
   }
 
-  const sep = hrBetween ? '\n---\n\n' : '\n\n';
+  const sep = hrBetween ? '\n\n' : '\n\n'; // keep double newlines either way
 
   const blocks = turns.map((t, i) => {
-    const label = roleLabel(t.role);
-    const bodyMd = htmlToMarkdown(htmlBodies[i] || ''); // ← use converted HTML
-    const body = (bodyMd || t.text || '').replace(/\r\n/g, '\n').trimEnd();
-    return `**${label}:**  \n${body}`;
+    const bodyMd = htmlToMarkdown(htmlBodies[i] || '').replace(/\r\n/g, '\n').trimEnd();
+    if (t.role === 'user') {
+      return renderPromptBlockquote(bodyMd);
+    }
+    if (t.role === 'assistant') {
+      return renderResponseSection(bodyMd);
+    }
+    // system / tool (rare) — keep simple but styled
+    const label = t.role === 'system' ? 'System' : 'Tool';
+    return `**${label}**\n\n${bodyMd}`;
   });
 
   out.push(blocks.join(sep));
@@ -273,8 +310,6 @@ export function buildMarkdownExportByFormat(
     const htmlBodies = opts?.htmlBodies ?? [];
     // Fallback: if not provided, degrade gracefully to text-only (old behavior)
     if (!htmlBodies.length || htmlBodies.length !== turns.length) {
-      // Degrade to text-only Pure style
-      const sep = '\n---\n\n';
       const head = (opts?.includeFrontMatter ?? true) ? renderFrontMatter(metaWithTitle) : '';
       const title = metaWithTitle.chatTitle || 'Chat Export';
       const metaLines = [
@@ -287,12 +322,14 @@ export function buildMarkdownExportByFormat(
       ].filter(Boolean).join('\n');
 
       const blocks = turns.map((t) => {
-        const label = roleLabel(t.role);
         const body = (t.text || '').replace(/\r\n/g, '\n').trimEnd();
-        return `**${label}:**  \n${body}`;
+        if (t.role === 'user') return renderPromptBlockquote(body);
+        if (t.role === 'assistant') return renderResponseSection(body);
+        const label = roleLabel(t.role);
+        return `**${label}**\n\n${body}`;
       });
 
-      const body = blocks.join(sep);
+      const body = blocks.join('\n\n');
       const notes = opts?.freeformNotes?.trim() ? `\n\n## Notes\n\n${opts.freeformNotes.trim()}\n` : '';
       return `${metaLines}${body}${notes}${body.endsWith('\n') ? '' : '\n'}`;
     }
