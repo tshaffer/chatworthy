@@ -474,21 +474,22 @@ function hideNativeRoleLabels(container: HTMLElement) {
 }
 
 function syncAssistantTypographyVars() {
-  // Prefer a rich content node from our tuples
-  const tuples = getMessageTuples();
-  const firstAssistant = tuples.find(t => t.role === 'assistant')?.el
-    || document.querySelector<HTMLElement>('.markdown.prose')
-    || document.querySelector<HTMLElement>('[data-message-author-role="assistant"]');
+  // Prefer a deep text node inside assistant prose for accurate computed styles
+  const probe =
+    document.querySelector<HTMLElement>('.markdown.prose p, .markdown.prose li, .markdown.prose') ||
+    document.querySelector<HTMLElement>('[data-message-author-role="assistant"]') ||
+    document.querySelector<HTMLElement>('[data-cw-role="assistant"]');
 
-  if (!firstAssistant) return;
+  if (!probe) return;
 
-  const cs = getComputedStyle(firstAssistant);
+  const cs = getComputedStyle(probe);
   const root = document.documentElement;
 
+  // Capture the full set we’ll mirror
   root.style.setProperty('--cw-assistant-font-family', cs.fontFamily || 'inherit');
   root.style.setProperty('--cw-assistant-font-size', cs.fontSize || 'inherit');
-  root.style.setProperty('--cw-assistant-line-height', cs.lineHeight || 'inherit');
-  root.style.setProperty('--cw-assistant-font-weight', cs.fontWeight || 'inherit');
+  root.style.setProperty('--cw-assistant-line-height', cs.lineHeight || '1.5');
+  root.style.setProperty('--cw-assistant-font-weight', cs.fontWeight || '400');
   root.style.setProperty('--cw-assistant-color', cs.color || 'inherit');
 }
 
@@ -496,24 +497,61 @@ function relabelAndRestyleMessages() {
   syncAssistantTypographyVars();
 
   const tuples = getMessageTuples();
-
   for (const { el, role } of tuples) {
-    // Try to hide native labels (harmless if none)
+    // Hide native labels if present
     hideNativeRoleLabels(el);
 
-    if (el.hasAttribute('data-cw-processed')) continue;
+    // Add/refresh our normalization classes every pass
+    // if (role === 'user') el.classList.add('cw-unify-to-assistant');
+    // if (role === 'assistant') el.classList.add('cw-assistant-normalize-suggestions');
+    if (role === 'user') {
+      el.classList.add('cw-unify-to-assistant');
+      forcePromptTypography(el); // 🔥 hard-pin Prompt body appearance
+    } else {
+      el.classList.add('cw-assistant-normalize-suggestions');
+    }
 
-    // Insert our consistent label
-    const header = document.createElement('div');
-    header.className = 'cw-role-label';
-    header.textContent = role === 'user' ? 'Prompt' : 'Response';
-    el.prepend(header);
+    // Inject a single label at the top (once)
+    if (!el.querySelector(':scope > .cw-role-label')) {
+      // Insert our consistent label
+      // Insert our consistent label
+      const header = document.createElement('div');
+      header.className = 'cw-role-label';
+      header.textContent = role === 'user' ? 'Prompt' : 'Response';
 
-    if (role === 'user') el.classList.add('cw-unify-to-assistant');
-    if (role === 'assistant') el.classList.add('cw-assistant-normalize-suggestions');
+      // 🔧 Inline + !important to beat utility classes
+      const setImp = (prop: string, val: string) => header.style.setProperty(prop, val, 'important');
+      setImp('font-family', 'var(--cw-assistant-font-family)');
+      setImp('font-size', 'var(--cw-assistant-font-size)');
+      setImp('line-height', 'var(--cw-assistant-line-height)');
+      setImp('font-weight', '600'); // label semibold
+      setImp('color', 'var(--cw-assistant-color)');
+      setImp('margin-bottom', '6px');
 
-    el.setAttribute('data-cw-processed', '1');
+      el.prepend(header);
+    }
   }
+}
+
+function forcePromptTypography(root: HTMLElement) {
+  const setImp = (prop: string, val: string) => root.style.setProperty(prop, val, 'important');
+
+  // Apply on the user message container so it inherits down
+  setImp('font-family', 'var(--cw-assistant-font-family)');
+  setImp('font-size', 'var(--cw-assistant-font-size)');
+  setImp('line-height', 'var(--cw-assistant-line-height)');
+  setImp('color', 'var(--cw-assistant-color)');
+  setImp('font-weight', 'var(--cw-assistant-font-weight)');
+
+  // Belt & suspenders: ensure deeply nested text nodes inherit too
+  // (skip code/pre to preserve monospace)
+  root.querySelectorAll<HTMLElement>('*:not(code):not(pre)').forEach(node => {
+    node.style.setProperty('font-family', 'var(--cw-assistant-font-family)', 'important');
+    node.style.setProperty('font-size', 'var(--cw-assistant-font-size)', 'important');
+    node.style.setProperty('line-height', 'var(--cw-assistant-line-height)', 'important');
+    node.style.setProperty('color', 'var(--cw-assistant-color)', 'important');
+    node.style.setProperty('font-weight', 'var(--cw-assistant-font-weight)', 'important');
+  });
 }
 
 // ---- Floating UI -------------------------------------------
@@ -712,69 +750,74 @@ function ensureStyles() {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    /* Floating UI buttons */
-    #${ROOT_ID} button {
-      padding: 4px 8px;
-      border: 1px solid rgba(0,0,0,0.2);
-      border-radius: 6px;
-      background: white;
-      font-size: 12px;
-      line-height: 1.2;
-    }
-    #${ROOT_ID} button:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-      filter: grayscale(100%);
-    }
-    #${ROOT_ID} .chatworthy-toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      line-height: 1.2;
-      margin-left: 4px;
-      white-space: nowrap;
-    }
-    #${ROOT_ID} .chatworthy-toggle input {
-      transform: translateY(0.5px);
-    }
-    #${ROOT_ID} label.chatworthy-item input[type="checkbox"] {
-      margin-left: 2px;
-    }
+  /* Floating UI buttons */
+  #${ROOT_ID} button {
+    padding: 4px 8px;
+    border: 1px solid rgba(0,0,0,0.2);
+    border-radius: 6px;
+    background: white;
+    font-size: 12px;
+    line-height: 1.2;
+  }
+  #${ROOT_ID} button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: grayscale(100%);
+  }
+  #${ROOT_ID} .chatworthy-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    margin-left: 4px;
+    white-space: nowrap;
+  }
+  #${ROOT_ID} .chatworthy-toggle input { transform: translateY(0.5px); }
+  #${ROOT_ID} label.chatworthy-item input[type="checkbox"] { margin-left: 2px; }
 
-    /* Injected role label (Prompt/Response) styled like assistant label */
-    [data-cw-role] > .cw-role-label {
-      font-family: var(--cw-assistant-font-family, inherit) !important;
-      font-size: var(--cw-assistant-font-size, inherit) !important;
-      line-height: var(--cw-assistant-line-height, 1.2) !important;
-      font-weight: 600 !important;
-      color: var(--cw-assistant-color, rgba(0,0,0,0.75)) !important;
-      margin-bottom: 6px !important;
-    }
+  /* Label: we also set inline styles now, but keep this as a fallback */
+  [data-cw-role] > .cw-role-label {
+    font-family: var(--cw-assistant-font-family) !important;
+    font-size: var(--cw-assistant-font-size) !important;
+    line-height: var(--cw-assistant-line-height) !important;
+    font-weight: 600 !important;
+    color: var(--cw-assistant-color) !important;
+    margin-bottom: 6px !important;
+  }
 
-    /* Entire Prompt (user) body uses assistant typography */
-    [data-cw-role="user"].cw-unify-to-assistant,
-    [data-cw-role="user"].cw-unify-to-assistant * {
-      font-family: var(--cw-assistant-font-family, inherit) !important;
-      font-size: var(--cw-assistant-font-size, inherit) !important;
-      line-height: var(--cw-assistant-line-height, inherit) !important;
-      color: var(--cw-assistant-color, inherit) !important;
-      font-weight: var(--cw-assistant-font-weight, inherit) !important;
-    }
+  /* Prompt (user) body → mirror assistant typography with high specificity */
+  html body [data-cw-role="user"].cw-unify-to-assistant,
+  html body [data-cw-role="user"].cw-unify-to-assistant *:not(code):not(pre) {
+    font-family: var(--cw-assistant-font-family) !important;
+    font-size: var(--cw-assistant-font-size) !important;
+    line-height: var(--cw-assistant-line-height) !important;
+    color: var(--cw-assistant-color) !important;
+    font-weight: var(--cw-assistant-font-weight) !important;
+  }
 
-    /* Suggestion chips in Responses also match assistant typography */
-    [data-cw-role="assistant"].cw-assistant-normalize-suggestions button,
-    [data-cw-role="assistant"].cw-assistant-normalize-suggestions a[role="button"],
-    [data-cw-role="assistant"].cw-assistant-normalize-suggestions [data-testid*="suggestion"] {
-      font-family: var(--cw-assistant-font-family, inherit) !important;
-      font-size: var(--cw-assistant-font-size, inherit) !important;
-      line-height: var(--cw-assistant-line-height, inherit) !important;
-      color: var(--cw-assistant-color, inherit) !important;
-      font-weight: var(--cw-assistant-font-weight, inherit) !important;
-    }
-  `;
+  /* Normalize suggestion chips INSIDE an assistant turn */
+  html body [data-cw-role="assistant"].cw-assistant-normalize-suggestions
+    :is(button, a[role="button"], [data-testid*="suggest"], [data-testid*="quick-reply"], [class*="suggest"]) {
+    font-family: var(--cw-assistant-font-family) !important;
+    font-size: var(--cw-assistant-font-size) !important;
+    line-height: var(--cw-assistant-line-height) !important;
+    color: var(--cw-assistant-color) !important;
+    font-weight: var(--cw-assistant-font-weight) !important;
+  }
+
+  /* Fallback: if the site renders suggestion chips just outside the assistant node */
+  html body :is([data-testid*="suggest"], [data-testid*="quick-reply"], [class*="suggestion"]) {
+    font-family: var(--cw-assistant-font-family) !important;
+    font-size: var(--cw-assistant-font-size) !important;
+    line-height: var(--cw-assistant-line-height) !important;
+    color: var(--cw-assistant-color) !important;
+    font-weight: var(--cw-assistant-font-weight) !important;
+  }
+`;
   (document.head || document.documentElement).appendChild(style);
+
 }
 
 // ---- Observer + scheduling ---------------------------------
