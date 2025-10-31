@@ -102,16 +102,6 @@ function filenameBase(): string {
   return `${t || 'chat'}-${stamp}`;
 }
 
-function summarizePromptText(s: string, max = 60): string {
-  const t = (s || '')
-    .replaceAll('<br>', '\n')
-    .replace(/<\/(p|div|li)>/g, '\n')
-    .replace(/<[^>]+>/g, '')
-    .trim()
-    .replace(/\s+/g, ' ');
-  return t.length > max ? t.slice(0, max - 1) + '…' : t;
-}
-
 function getSelectedPromptIndexes(): number[] {
   const root = document.getElementById(ROOT_ID);
   if (!root) return [];
@@ -214,19 +204,6 @@ function getMessageTuples(): Array<{ el: HTMLElement; role: 'user' | 'assistant'
   }
 
   return chosen;
-}
-
-// ---- Export data building ----------------------------------
-
-function extractTurns(): ExportTurn[] {
-  const tuples = getMessageTuples();
-  return tuples.map(t => {
-    const clean = cloneWithoutInjected(t.el);
-    return {
-      role: t.role,
-      text: (clean.textContent ?? '').trim()
-    };
-  });
 }
 
 /**
@@ -473,60 +450,7 @@ function hideNativeRoleLabels(container: HTMLElement) {
   }
 }
 
-function syncAssistantTypographyVars() {
-  // Prefer a deep text node inside assistant prose for accurate computed styles
-  const probe =
-    document.querySelector<HTMLElement>('.markdown.prose p, .markdown.prose li, .markdown.prose') ||
-    document.querySelector<HTMLElement>('[data-message-author-role="assistant"]') ||
-    document.querySelector<HTMLElement>('[data-cw-role="assistant"]');
-
-  if (!probe) return;
-
-  const cs = getComputedStyle(probe);
-  const root = document.documentElement;
-
-  // Capture the full set we’ll mirror
-  root.style.setProperty('--cw-assistant-font-family', cs.fontFamily || 'inherit');
-  root.style.setProperty('--cw-assistant-font-size', cs.fontSize || 'inherit');
-  root.style.setProperty('--cw-assistant-line-height', cs.lineHeight || '1.5');
-  root.style.setProperty('--cw-assistant-font-weight', cs.fontWeight || '400');
-  root.style.setProperty('--cw-assistant-color', cs.color || 'inherit');
-}
-
-function applyAssistantTypographyInline(el: HTMLElement) {
-  const root = document.documentElement;
-  const ff = getComputedStyle(root).getPropertyValue('--cw-assistant-font-family') || '';
-  const fs = getComputedStyle(root).getPropertyValue('--cw-assistant-font-size') || '';
-  const lh = getComputedStyle(root).getPropertyValue('--cw-assistant-line-height') || '';
-  const fw = getComputedStyle(root).getPropertyValue('--cw-assistant-font-weight') || '';
-  const c = getComputedStyle(root).getPropertyValue('--cw-assistant-color') || '';
-
-  // Apply to the root
-  el.style.setProperty('fontFamily', ff.trim(), 'important');
-  el.style.setProperty('fontSize', fs.trim(), 'important');
-  el.style.setProperty('lineHeight', lh.trim(), 'important');
-  el.style.setProperty('fontWeight', fw.trim(), 'important');
-  el.style.setProperty('color', c.trim(), 'important');
-
-  // Apply deeply to common text nodes inside (pre/code too)
-  el.querySelectorAll<HTMLElement>('p, div, li, span, a, button, pre, code, h1, h2, h3, h4, h5, h6').forEach(n => {
-    n.style.setProperty('fontFamily', ff.trim(), 'important');
-    n.style.setProperty('fontSize', fs.trim(), 'important');
-    n.style.setProperty('lineHeight', lh.trim(), 'important');
-    n.style.setProperty('fontWeight', fw.trim(), 'important');
-    n.style.setProperty('color', c.trim(), 'important');
-  });
-}
-
-function normalizeSuggestionChips(el: HTMLElement) {
-  // Hit anything that looks like a suggestion/quick reply chip near the end of an assistant turn
-  el.querySelectorAll<HTMLElement>('button, a[role="button"], [data-testid*="suggest"], [data-testid*="quick"]').forEach(n => {
-    applyAssistantTypographyInline(n);
-  });
-}
-
 function relabelAndRestyleMessages() {
-  syncAssistantTypographyVars();
   const tuples = getMessageTuples();
 
   for (const { el, role } of tuples) {
@@ -541,50 +465,10 @@ function relabelAndRestyleMessages() {
       el.prepend(label);
     }
 
-    if (role === 'user') {
-      // Wrap all non-label children in a sandbox that wipes host styles
-      let sandbox = el.querySelector(':scope > .cw-typo-sandbox') as HTMLDivElement | null;
-      if (!sandbox) {
-        sandbox = document.createElement('div');
-        sandbox.className = 'cw-typo-sandbox';
-
-        // move every sibling after the label into the sandbox
-        const toMove: ChildNode[] = [];
-        for (let n = label.nextSibling; n; n = n.nextSibling) toMove.push(n);
-        toMove.forEach(n => sandbox.appendChild(n));
-
-        el.appendChild(sandbox);
-      }
-
-      el.classList.add('cw-unify-to-assistant');
-    } else {
-      el.classList.add('cw-assistant-normalize-suggestions');
-    }
-
     el.setAttribute('data-cw-processed', '1');
   }
 }
 
-function forcePromptTypography(root: HTMLElement) {
-  const setImp = (prop: string, val: string) => root.style.setProperty(prop, val, 'important');
-
-  // Apply on the user message container so it inherits down
-  setImp('font-family', 'var(--cw-assistant-font-family)');
-  setImp('font-size', 'var(--cw-assistant-font-size)');
-  setImp('line-height', 'var(--cw-assistant-line-height)');
-  setImp('color', 'var(--cw-assistant-color)');
-  setImp('font-weight', 'var(--cw-assistant-font-weight)');
-
-  // Belt & suspenders: ensure deeply nested text nodes inherit too
-  // (skip code/pre to preserve monospace)
-  root.querySelectorAll<HTMLElement>('*:not(code):not(pre)').forEach(node => {
-    node.style.setProperty('font-family', 'var(--cw-assistant-font-family)', 'important');
-    node.style.setProperty('font-size', 'var(--cw-assistant-font-size)', 'important');
-    node.style.setProperty('line-height', 'var(--cw-assistant-line-height)', 'important');
-    node.style.setProperty('color', 'var(--cw-assistant-color)', 'important');
-    node.style.setProperty('font-weight', 'var(--cw-assistant-font-weight)', 'important');
-  });
-}
 
 // ---- Floating UI -------------------------------------------
 
@@ -809,120 +693,17 @@ function ensureStyles() {
   #${ROOT_ID} .chatworthy-toggle input { transform: translateY(0.5px); }
   #${ROOT_ID} label.chatworthy-item input[type="checkbox"] { margin-left: 2px; }
 
-  /* Label: we also set inline styles now, but keep this as a fallback */
-  [data-cw-role] > .cw-role-label {
-    font-family: var(--cw-assistant-font-family) !important;
-    font-size: var(--cw-assistant-font-size) !important;
-    line-height: var(--cw-assistant-line-height) !important;
-    font-weight: 600 !important;
-    color: var(--cw-assistant-color) !important;
-    margin-bottom: 6px !important;
-  }
-
-  /* Prompt (user) body → mirror assistant typography with high specificity */
-  html body [data-cw-role="user"].cw-unify-to-assistant,
-  html body [data-cw-role="user"].cw-unify-to-assistant *:not(code):not(pre) {
-    font-family: var(--cw-assistant-font-family) !important;
-    font-size: var(--cw-assistant-font-size) !important;
-    line-height: var(--cw-assistant-line-height) !important;
-    color: var(--cw-assistant-color) !important;
-    font-weight: var(--cw-assistant-font-weight) !important;
-  }
-
-  /* Normalize suggestion chips INSIDE an assistant turn */
-  html body [data-cw-role="assistant"].cw-assistant-normalize-suggestions
-    :is(button, a[role="button"], [data-testid*="suggest"], [data-testid*="quick-reply"], [class*="suggest"]) {
-    font-family: var(--cw-assistant-font-family) !important;
-    font-size: var(--cw-assistant-font-size) !important;
-    line-height: var(--cw-assistant-line-height) !important;
-    color: var(--cw-assistant-color) !important;
-    font-weight: var(--cw-assistant-font-weight) !important;
-  }
-
-  /* Fallback: if the site renders suggestion chips just outside the assistant node */
-  html body :is([data-testid*="suggest"], [data-testid*="quick-reply"], [class*="suggestion"]) {
-    font-family: var(--cw-assistant-font-family) !important;
-    font-size: var(--cw-assistant-font-size) !important;
-    line-height: var(--cw-assistant-line-height) !important;
-    color: var(--cw-assistant-color) !important;
-    font-weight: var(--cw-assistant-font-weight) !important;
-  }
-
-  /* Typography sandbox that zeroes out host styles, then reapplies assistant look */
-  .cw-typo-sandbox {
-    /* wipe inherited UA + host styles */
-    all: unset !important;
-    display: block !important;
-
-    /* reapply assistant variables as the new inheritance root */
-    font-family: var(--cw-assistant-font-family) !important;
-    font-size:   var(--cw-assistant-font-size)   !important;
-    line-height: var(--cw-assistant-line-height) !important;
-    font-weight: var(--cw-assistant-font-weight) !important;
-    color:       var(--cw-assistant-color)       !important;
-  }
-
-  /* children inherit from the sandbox; only ensure they don't reintroduce host text styles */
-  .cw-typo-sandbox * {
-    all: unset !important;
-    display: revert !important;         /* keep normal flow for common tags */
-    font: inherit !important;           /* inherit the assistant font stack, size, weight */
-    line-height: inherit !important;
-    color: inherit !important;
-    white-space: revert !important;     /* keep paragraphs behaving like text */
-  }
-
-  /* headings & lists still need structure restored */
-  .cw-typo-sandbox p,
-  .cw-typo-sandbox div { display: block !important; }
-  .cw-typo-sandbox h1,
-  .cw-typo-sandbox h2,
-  .cw-typo-sandbox h3,
-  .cw-typo-sandbox h4,
-  .cw-typo-sandbox h5,
-  .cw-typo-sandbox h6 { display:block!important; font-weight:600!important; margin:0 0 .25rem 0!important; }
-  .cw-typo-sandbox ul,
-  .cw-typo-sandbox ol { display:block!important; padding-left:1.25rem!important; margin:.25rem 0!important; }
-  .cw-typo-sandbox li { display:list-item!important; }
-
   /* label spacing */
   [data-cw-role] > .cw-role-label {
     display:block !important;
     margin: 0 0 6px 0 !important;
     font-weight:600 !important;
   }
-
-  /* suggestion chips (assistant “ideas” at end) */
-  .cw-assistant-normalize-suggestions button,
-  .cw-assistant-normalize-suggestions a[role="button"],
-  .cw-assistant-normalize-suggestions [data-testid*="suggest"],
-  .cw-assistant-normalize-suggestions [data-testid*="quick"] {
-    all: unset !important;
-    display:inline-flex!important;
-    align-items:center!important;
-    gap:.25rem!important;
-    padding:.25rem .5rem!important;
-    border-radius:.5rem!important;
-    border:1px solid rgba(0,0,0,.12)!important;
-    cursor:pointer!important;
-
-    font-family: var(--cw-assistant-font-family) !important;
-    font-size:   var(--cw-assistant-font-size)   !important;
-    line-height: var(--cw-assistant-line-height) !important;
-    font-weight: var(--cw-assistant-font-weight) !important;
-    color:       var(--cw-assistant-color)       !important;
-  }
-
   `;
   (document.head || document.documentElement).appendChild(style);
 
 }
-/*
-  [data-cw-role] > .cw-role-label {
-    display: block !important;
-    margin: 0 0 6px 0 !important;
-  }
-*/
+
 // ---- Observer + scheduling ---------------------------------
 
 let mo: MutationObserver | null = null;
