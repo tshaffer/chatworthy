@@ -110,7 +110,7 @@ function firstLineTitle(s: string | undefined, fallback: string) {
   const line = (s || '')
     .split('\n')
     .find(l => l.trim().length > 0)?.trim() ?? fallback;
-  return line.length > 120 ? line.slice(0, 117) + '…' : line;
+  return line.length > 220 ? line.slice(0, 217) + '…' : line;
 }
 
 function buildToc(prompts: { idx: number; title: string; anchor: string }[]): string[] {
