@@ -116,10 +116,14 @@ function firstLineTitle(s: string | undefined, fallback: string) {
 function buildToc(prompts: { idx: number; title: string; anchor: string }[]): string[] {
   if (!prompts.length) return [];
   const out: string[] = [];
-  out.push('## Table of Contents');
+  out.push('## Table of Contents', ''); // blank line for proper MD rendering
+
   for (const p of prompts) {
-    out.push(`- [${p.idx}. ${p.title}](#${p.anchor})`);
+    const safeTitle = p.title.replace(/\n+/g, ' ').trim();
+    // Ordered-list item (no bullets): "1. [Title](#anchor)"
+    out.push(`${p.idx}. [${safeTitle}](#${p.anchor})`);
   }
+
   out.push('');
   return out;
 }
