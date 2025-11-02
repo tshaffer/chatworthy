@@ -106,6 +106,24 @@ function renderFrontMatter(meta: ExportNoteMetadata): string {
   return lines.join('\n');
 }
 
+function firstLineTitle(s: string | undefined, fallback: string) {
+  const line = (s || '')
+    .split('\n')
+    .find(l => l.trim().length > 0)?.trim() ?? fallback;
+  return line.length > 120 ? line.slice(0, 117) + '…' : line;
+}
+
+function buildToc(prompts: { idx: number; title: string; anchor: string }[]): string[] {
+  if (!prompts.length) return [];
+  const out: string[] = [];
+  out.push('## Table of Contents');
+  for (const p of prompts) {
+    out.push(`- [${p.idx}. ${p.title}](#${p.anchor})`);
+  }
+  out.push('');
+  return out;
+}
+
 // --- Rendering helpers (Prompt/Response formatting) -----------------
 
 function renderPromptBlockquote(md: string): string {
@@ -116,6 +134,11 @@ function renderPromptBlockquote(md: string): string {
     .map((l) => (l.length ? `> ${l}` : '>'))
     .join('\n');
   return `**Prompt**\n\n${quoted}`;
+}
+
+function renderPromptBlockquoteWithAnchor(md: string, anchorId: string): string {
+  const anchor = `<a id="${anchorId}"></a>`;
+  return `${anchor}\n${renderPromptBlockquote(md)}`;
 }
 
 function normalizeSuggestionsSection(md: string): string {
@@ -238,6 +261,7 @@ function toPureMarkdownChatStyleFromHtml(
     includeMetaRow?: boolean;
     hrBetween?: boolean;
     freeformNotes?: string;
+    includeToc?: boolean; // NEW: default true
   }
 ): string {
   const {
@@ -246,6 +270,7 @@ function toPureMarkdownChatStyleFromHtml(
     includeMetaRow = true,
     hrBetween = false, // ← default OFF (no ---)
     freeformNotes,
+    includeToc = true,
   } = opts || {};
 
   const out: string[] = [];
@@ -259,12 +284,36 @@ function toPureMarkdownChatStyleFromHtml(
     out.push('');
   }
 
+  // Precompute prompt titles/anchors for ToC
+  const promptInfos: { idx: number; title: string; anchor: string; turnIndex: number }[] = [];
+  let promptCounter = 0;
+  turns.forEach((t, i) => {
+    if (t.role === 'user') {
+      promptCounter += 1;
+      const md = htmlToMarkdown(htmlBodies[i] || '');
+      const titleText = firstLineTitle(md, `Prompt ${promptCounter}`);
+      promptInfos.push({
+        idx: promptCounter,
+        title: titleText,
+        anchor: `p-${promptCounter}`,
+        turnIndex: i,
+      });
+    }
+  });
+
+  if (includeToc) {
+    out.push(...buildToc(promptInfos.map(p => ({ idx: p.idx, title: p.title, anchor: p.anchor }))));
+  }
+
   const sep = hrBetween ? '\n\n' : '\n\n'; // keep double newlines either way
 
+  let currentPromptNumber = 0;
   const blocks = turns.map((t, i) => {
     const bodyMd = htmlToMarkdown(htmlBodies[i] || '').replace(/\r\n/g, '\n').trimEnd();
     if (t.role === 'user') {
-      return renderPromptBlockquote(bodyMd);
+      currentPromptNumber += 1;
+      const anchorId = `p-${currentPromptNumber}`;
+      return renderPromptBlockquoteWithAnchor(bodyMd, anchorId);
     }
     if (t.role === 'assistant') {
       return renderResponseSection(bodyMd);
@@ -288,7 +337,7 @@ function toPureMarkdownChatStyleFromHtml(
 
 /**
  * Chooses between:
- * - 'markdown_pure'  => ChatGPT Exporter–style Markdown using per-turn HTML bodies
+ * - 'markdown_pure'  => ChatGPT Exporter–style Markdown using per-turn HTML bodies (now with ToC + anchors)
  * - 'markdown_html'  => your existing YAML + transcript block (legacy)
  */
 export function buildMarkdownExportByFormat(
@@ -300,6 +349,7 @@ export function buildMarkdownExportByFormat(
     freeformNotes?: string;
     includeFrontMatter?: boolean;
     htmlBodies?: string[]; // required for Pure MD
+    includeToc?: boolean;  // NEW: default true for Pure MD
   }
 ): string {
   const metaWithTitle: ExportNoteMetadata = opts?.title
@@ -308,7 +358,9 @@ export function buildMarkdownExportByFormat(
 
   if (format === 'markdown_pure') {
     const htmlBodies = opts?.htmlBodies ?? [];
-    // Fallback: if not provided, degrade gracefully to text-only (old behavior)
+    const includeToc = opts?.includeToc ?? true;
+
+    // Fallback: if not provided, degrade to text-only, but still add ToC + anchors
     if (!htmlBodies.length || htmlBodies.length !== turns.length) {
       const head = (opts?.includeFrontMatter ?? true) ? renderFrontMatter(metaWithTitle) : '';
       const title = metaWithTitle.chatTitle || 'Chat Export';
@@ -321,9 +373,30 @@ export function buildMarkdownExportByFormat(
         ''
       ].filter(Boolean).join('\n');
 
+      // Build prompt list for ToC from plain text
+      const prompts: { idx: number; title: string; anchor: string }[] = [];
+      let pc = 0;
+      for (const t of turns) {
+        if (t.role === 'user') {
+          pc += 1;
+          prompts.push({
+            idx: pc,
+            title: firstLineTitle(t.text, `Prompt ${pc}`),
+            anchor: `p-${pc}`,
+          });
+        }
+      }
+
+      const toc = includeToc ? buildToc(prompts) : [];
+
+      // Render body with anchors
+      let currentPrompt = 0;
       const blocks = turns.map((t) => {
         const body = (t.text || '').replace(/\r\n/g, '\n').trimEnd();
-        if (t.role === 'user') return renderPromptBlockquote(body);
+        if (t.role === 'user') {
+          currentPrompt += 1;
+          return renderPromptBlockquoteWithAnchor(body, `p-${currentPrompt}`);
+        }
         if (t.role === 'assistant') return renderResponseSection(body);
         const label = roleLabel(t.role);
         return `**${label}**\n\n${body}`;
@@ -331,7 +404,7 @@ export function buildMarkdownExportByFormat(
 
       const body = blocks.join('\n\n');
       const notes = opts?.freeformNotes?.trim() ? `\n\n## Notes\n\n${opts.freeformNotes.trim()}\n` : '';
-      return `${metaLines}${body}${notes}${body.endsWith('\n') ? '' : '\n'}`;
+      return `${metaLines}${toc.join('\n')}${body}${notes}${body.endsWith('\n') ? '' : '\n'}`;
     }
 
     return toPureMarkdownChatStyleFromHtml(
@@ -344,6 +417,7 @@ export function buildMarkdownExportByFormat(
         includeMetaRow: true,
         hrBetween: true,
         freeformNotes: opts?.freeformNotes,
+        includeToc,
       }
     );
   }
