@@ -9,7 +9,7 @@ import { buildMarkdownExportByFormat } from './utils/exporters';
  *  - Floating “Export” UI (collapsible)
  *  - Robust observer for new messages
  *  - Adds a "Pure Markdown" export option (no embedded HTML)
- *  - Relabels "You/ChatGPT" -> "Prompt/Response" and unifies Prompt styling
+ *  - Relabels "You/ChatGPT" -> "Prompt/Response"
  *  - Works even when the page lacks data-message-author-role (uses our own tags)
  *  - NEW: Click an item in the list to scroll to that Prompt
  * ------------------------------------------------------------
@@ -68,7 +68,6 @@ function startRepairLoop() {
   // Expose for quick console debugging
   (window as any).cw_getMessageTuples = getMessageTuples;
 
-  // Paste once near other singletons:
   (window as any).cw_debugTuples = () => {
     const t = getMessageTuples();
     const users = t.filter(x => x.role === 'user').length;
@@ -127,11 +126,6 @@ function cloneWithoutInjected(el: HTMLElement): HTMLElement {
 /**
  * Returns ordered tuples of { el, role } for visible messages,
  * tagging each element with data-cw-role="user|assistant" for stable CSS.
- *
- * Heuristics based on your sample:
- * - User: right-aligned container with bubble having .user-message-bubble-color
- * - Assistant: .markdown.prose blocks (not inside right-aligned user container)
- * - Also supports legacy [data-message-author-role] if present
  */
 function getMessageTuples(): Array<{ el: HTMLElement; role: 'user' | 'assistant' }> {
   const chosen: Array<{ el: HTMLElement; role: 'user' | 'assistant' }> = [];
@@ -144,31 +138,22 @@ function getMessageTuples(): Array<{ el: HTMLElement; role: 'user' | 'assistant'
     '[data-message-author-role]'
   ].join(',')));
 
-  // Pick a stable root for a candidate node.
   const pickRoot = (n: HTMLElement): HTMLElement =>
     n.closest<HTMLElement>('[data-testid="conversation-turn"]')
     || n.closest<HTMLElement>('[data-message-id]')
     || n.closest<HTMLElement>('article, li, section')
     || n;
 
-  // Decide role from attributes/content inside a root.
   const roleOf = (root: HTMLElement): 'user' | 'assistant' => {
-    // 1) Explicit attribute wins.
     const attrNode = root.matches('[data-message-author-role]')
       ? root
       : root.querySelector<HTMLElement>('[data-message-author-role]');
     const raw = (attrNode?.getAttribute('data-message-author-role') || '').toLowerCase();
     if (raw === 'user' || raw === 'assistant') return raw as 'user' | 'assistant';
-
-    // 2) Common UI clues.
     if (root.querySelector('.user-message-bubble-color')) return 'user';
-
-    // 3) Fallback: if there’s a right-aligned container, assume user.
     if (root.matches('.items-end, [class*="items-end"]') || root.querySelector('.items-end, [class*="items-end"]')) {
       return 'user';
     }
-
-    // 4) Default to assistant.
     return 'assistant';
   };
 
@@ -186,8 +171,7 @@ function getMessageTuples(): Array<{ el: HTMLElement; role: 'user' | 'assistant'
     chosen.push({ el: root, role });
   }
 
-  // As a safety net: if we somehow found no assistant nodes but there are visible assistant blocks,
-  // sweep for rich content containers not inside user turns.
+  // Safety net sweep
   if (!chosen.some(c => c.role === 'assistant')) {
     const extras = Array.from(document.querySelectorAll<HTMLElement>('.markdown, .prose, [data-testid="markdown"]'));
     for (const md of extras) {
@@ -210,23 +194,20 @@ function getMessageTuples(): Array<{ el: HTMLElement; role: 'user' | 'assistant'
 // ---- Build selected payload --------------------------------
 
 function buildSelectedPayload(): { turns: ExportTurn[]; htmlBodies: string[] } {
-  // Canonical list of message roots in visual order
-  const tuples = getMessageTuples(); // [{ el: HTMLElement, role: 'user'|'assistant' }]
+  const tuples = getMessageTuples();
   const allEls: HTMLElement[] = tuples.map(t => t.el);
   const allTurns: ExportTurn[] = tuples.map(t => {
     const clean = cloneWithoutInjected(t.el);
     return { role: t.role, text: (clean.textContent ?? '').trim() };
   });
 
-  // Selected indices come from user checkboxes whose data-uindex === data-cw-msgid (overall tuple index)
-  const raw = getSelectedPromptIndexes(); // string[] | number[] depending on your impl
+  const raw = getSelectedPromptIndexes();
   let selected = raw
     .map(n => typeof n === 'string' ? parseInt(n, 10) : Number(n))
     .filter(n => Number.isFinite(n))
-    .filter((n, i, arr) => arr.indexOf(n) === i) // de-dupe
+    .filter((n, i, arr) => arr.indexOf(n) === i)
     .sort((a, b) => a - b);
 
-  // Keep only valid, in-range indices that point to a USER turn (defensive)
   selected = selected.filter(idx => idx >= 0 && idx < allTurns.length && allTurns[idx].role === 'user');
 
   if (selected.length === 0) return { turns: [], htmlBodies: [] };
@@ -234,18 +215,13 @@ function buildSelectedPayload(): { turns: ExportTurn[]; htmlBodies: string[] } {
   const turns: ExportTurn[] = [];
   const htmlBodies: string[] = [];
 
-  // For each selected user index, include that user turn and all following turns
-  // up to (but not including) the next selected user index (or the end).
   for (let i = 0; i < selected.length; i++) {
     const uIdx = selected[i];
     const nextCut = (i + 1 < selected.length) ? selected[i + 1] : allTurns.length;
-
-    // Guard against accidental inversion (shouldn't happen after sort, but be safe)
     const start = Math.max(0, Math.min(uIdx, allTurns.length));
     const end = Math.max(start + 1, Math.min(nextCut, allTurns.length));
 
     for (let j = start; j < end; j++) {
-      // Clone without our injected UI and grab HTML/text
       const el = allEls[j];
       const cleanEl = cloneWithoutInjected(el);
       turns.push(allTurns[j]);
@@ -467,42 +443,60 @@ function relabelAndRestyleMessages() {
   }
 }
 
-// ---- Jump-to-turn helper ----------------------------------
+// ---- Jump-to-turn helpers ----------------------------------
 
-function getFixedHeaderOffset(): number {
-  // Try to detect a sticky/fixed top bar; fall back to ~80px
-  const candidates = Array.from(document.querySelectorAll<HTMLElement>('*'))
-    .filter(el => {
-      const cs = getComputedStyle(el);
-      return (cs.position === 'fixed' || cs.position === 'sticky') &&
-        // near the top
-        (el.getBoundingClientRect().top <= 8) &&
-        // looks like a top bar / header-ish
-        (el.offsetHeight >= 40 && el.offsetHeight <= 140);
-    });
-  const maxH = candidates.reduce((m, el) => Math.max(m, el.offsetHeight || 0), 0);
-  return Math.max(maxH, 80);
+// Find the nearest ancestor that actually scrolls (overflow-y: auto/scroll and scrollHeight > clientHeight)
+function findScrollContainer(start: HTMLElement | null): HTMLElement {
+  let el: HTMLElement | null = start;
+  while (el) {
+    const cs = getComputedStyle(el);
+    const canScroll =
+      (cs.overflowY === 'auto' || cs.overflowY === 'scroll') &&
+      el.scrollHeight > el.clientHeight;
+    if (canScroll) return el;
+    el = el.parentElement;
+  }
+  // Fallback to the document scroller
+  return (document.scrollingElement || document.documentElement) as HTMLElement;
 }
 
+// Try to detect a fixed/sticky header inside the same scroll container
+function getLocalHeaderOffset(scrollEl: HTMLElement): number {
+  const rect = scrollEl.getBoundingClientRect();
+  const headerCandidates = Array.from(scrollEl.querySelectorAll<HTMLElement>('*')).filter(n => {
+    const cs = getComputedStyle(n);
+    if (!(cs.position === 'fixed' || cs.position === 'sticky')) return false;
+    const r = n.getBoundingClientRect();
+    // Treat as a top header if it “hugs” the container’s top edge
+    return r.top <= rect.top + 8 && r.height >= 40 && r.height <= 140;
+  });
+  const h = headerCandidates.reduce((m, n) => Math.max(m, n.getBoundingClientRect().height), 0);
+  return (h || 80) + 12; // default safety headroom
+}
+
+// Visual ping
 function highlightPrompt(el: HTMLElement) {
   el.classList.add('cw-jump-highlight');
-  // remove highlight after animation
   setTimeout(() => el.classList.remove('cw-jump-highlight'), 1200);
 }
 
-/** Scroll the USER turn with overall tuple index `idx` into view. */
-function scrollPromptIntoViewByIndex(idx: number) {
-  const tuples = getMessageTuples();                // all turns (user+assistant)
-  const t = tuples[idx];
-  if (!t || t.role !== 'user') return;             // safety; only scroll Prompts
-  const el = t.el;
+// Scroll inside the right container (not window)
+function scrollPromptIntoViewByIndex(tupleIndex: number) {
+  const tuples = getMessageTuples();
+  const t = tuples[tupleIndex];
+  if (!t || t.role !== 'user') return;
 
-  // Compute target top with header offset
-  const offset = getFixedHeaderOffset() + 12;      // add a bit of breathing room
-  const rect = el.getBoundingClientRect();
-  const top = window.pageYOffset + rect.top - offset;
+  const el = t.el as HTMLElement;
+  const scroller = findScrollContainer(el);
 
-  window.scrollTo({ top, behavior: 'smooth' });
+  const elRect = el.getBoundingClientRect();
+  const scRect = scroller.getBoundingClientRect();
+
+  const offset = getLocalHeaderOffset(scroller);
+  const current = scroller.scrollTop;
+  const targetY = current + (elRect.top - scRect.top) - offset;
+
+  scroller.scrollTo({ top: Math.max(targetY, 0), behavior: 'smooth' });
   highlightPrompt(el);
 }
 
@@ -622,7 +616,6 @@ function ensureFloatingUI() {
       controls.appendChild(exportBtn);
       root.appendChild(controls);
     } else {
-      // keep toggle label in sync with state
       const toggle = controls.querySelector('#' + TOGGLE_BTN_ID) as HTMLButtonElement | null;
       if (toggle) toggle.textContent = (root.getAttribute('data-collapsed') === '1') ? 'Show List' : 'Hide List';
     }
@@ -643,10 +636,9 @@ function ensureFloatingUI() {
     // 🔑 Make sure roles/labels are in place BEFORE we build the list
     relabelAndRestyleMessages();
 
-    // 4) Populate list from tuples (don’t depend on [data-cw-role] being there yet)
+    // 4) Populate list from tuples
     list.innerHTML = '';
-    const tuples = getMessageTuples(); // [{ el, role }]
-    const allEls = tuples.map(t => t.el);
+    const tuples = getMessageTuples();
 
     const userTuples: Array<{ idx: number; el: HTMLElement }> = [];
     tuples.forEach((t, idx) => {
@@ -686,10 +678,17 @@ function ensureFloatingUI() {
         span.textContent = (clone.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
         span.style.lineHeight = '1.2';
 
-        const navigate = () => scrollPromptIntoViewByIndex(idx);
-        item.addEventListener('click', navigate);
+        // Guarded handlers: clicking row scrolls; clicking checkbox only toggles
+        item.addEventListener('click', (e) => {
+          const target = e.target as HTMLElement;
+          if (target.tagName.toLowerCase() === 'input') return; // clicked the checkbox
+          scrollPromptIntoViewByIndex(idx);
+        });
         item.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(); }
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            scrollPromptIntoViewByIndex(idx);
+          }
         });
 
         item.appendChild(cb);
@@ -738,21 +737,16 @@ function ensureStyles() {
     white-space: nowrap;
   }
   #${ROOT_ID} .chatworthy-toggle input { transform: translateY(0.5px); }
-  #${ROOT_ID} label.chatworthy-item input[type="checkbox"] { margin-left: 2px; }
-  #${ROOT_ID} .chatworthy-item { cursor: pointer; }
-  #${ROOT_ID} .chatworthy-item input[type="checkbox"] { cursor: pointer; }
 
-  /* label spacing */
+  /* Row + checkbox cursors */
+  #${ROOT_ID} .chatworthy-item { cursor: pointer; }
+  #${ROOT_ID} .chatworthy-item input[type="checkbox"] { cursor: pointer; margin-left: 2px; }
+
+  /* Label spacing on turns */
   [data-cw-role] > .cw-role-label {
     display:block !important;
     margin: 0 0 6px 0 !important;
     font-weight:600 !important;
-  }
-
-  /* Flash highlight when a turn is navigated to */
-  [data-cw-role].cw-flash {
-    box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.45);
-    transition: box-shadow 300ms ease;
   }
 
   /* Subtle “jump” highlight on the scrolled-to Prompt */
@@ -763,10 +757,9 @@ function ensureStyles() {
   [data-cw-role="user"].cw-jump-highlight {
     animation: cwJumpFlash 1100ms ease-out 1;
     border-radius: 10px;
-  }  
+  }
   `;
   (document.head || document.documentElement).appendChild(style);
-
 }
 
 // ---- Observer + scheduling ---------------------------------
