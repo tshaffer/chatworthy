@@ -469,22 +469,41 @@ function relabelAndRestyleMessages() {
 
 // ---- Jump-to-turn helper ----------------------------------
 
-function scrollPromptIntoViewByIndex(tupleIndex: number) {
-  const tuples = getMessageTuples();
-  const t = tuples[tupleIndex];
-  if (!t || t.role !== 'user') return;
+function getFixedHeaderOffset(): number {
+  // Try to detect a sticky/fixed top bar; fall back to ~80px
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>('*'))
+    .filter(el => {
+      const cs = getComputedStyle(el);
+      return (cs.position === 'fixed' || cs.position === 'sticky') &&
+        // near the top
+        (el.getBoundingClientRect().top <= 8) &&
+        // looks like a top bar / header-ish
+        (el.offsetHeight >= 40 && el.offsetHeight <= 140);
+    });
+  const maxH = candidates.reduce((m, el) => Math.max(m, el.offsetHeight || 0), 0);
+  return Math.max(maxH, 80);
+}
 
+function highlightPrompt(el: HTMLElement) {
+  el.classList.add('cw-jump-highlight');
+  // remove highlight after animation
+  setTimeout(() => el.classList.remove('cw-jump-highlight'), 1200);
+}
+
+/** Scroll the USER turn with overall tuple index `idx` into view. */
+function scrollPromptIntoViewByIndex(idx: number) {
+  const tuples = getMessageTuples();                // all turns (user+assistant)
+  const t = tuples[idx];
+  if (!t || t.role !== 'user') return;             // safety; only scroll Prompts
   const el = t.el;
+
+  // Compute target top with header offset
+  const offset = getFixedHeaderOffset() + 12;      // add a bit of breathing room
   const rect = el.getBoundingClientRect();
-  const absoluteTop = rect.top + window.scrollY;
-  const offset = 80; // adjust if your sticky header covers content
-  const targetY = Math.max(absoluteTop - offset, 0);
+  const top = window.pageYOffset + rect.top - offset;
 
-  window.scrollTo({ top: targetY, behavior: 'smooth' });
-
-  // brief highlight to guide the eye
-  el.classList.add('cw-flash');
-  window.setTimeout(() => el.classList.remove('cw-flash'), 1200);
+  window.scrollTo({ top, behavior: 'smooth' });
+  highlightPrompt(el);
 }
 
 // ---- Floating UI -------------------------------------------
@@ -642,7 +661,7 @@ function ensureFloatingUI() {
       list.appendChild(empty);
     } else {
       for (const { idx, el: node } of userTuples) {
-        const item = d.createElement('div');
+        const item = d.createElement('div');               // use <div>, not <label>
         item.className = 'chatworthy-item';
         item.style.display = 'flex';
         item.style.alignItems = 'flex-start';
@@ -656,8 +675,7 @@ function ensureFloatingUI() {
         cb.type = 'checkbox';
         cb.dataset.uindex = String(idx);
         cb.addEventListener('change', updateControlsState);
-
-        // prevent row click from firing when checkbox itself is clicked/pressed
+        // Prevent row click from firing when clicking the checkbox itself
         cb.addEventListener('click', (e) => e.stopPropagation());
         cb.addEventListener('keydown', (e) => e.stopPropagation());
 
@@ -668,23 +686,14 @@ function ensureFloatingUI() {
         span.textContent = (clone.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
         span.style.lineHeight = '1.2';
 
+        const navigate = () => scrollPromptIntoViewByIndex(idx);
+        item.addEventListener('click', navigate);
+        item.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(); }
+        });
+
         item.appendChild(cb);
         item.appendChild(span);
-
-        // Click/keyboard to navigate (ignore direct clicks on the checkbox)
-        const navigate = () => scrollPromptIntoViewByIndex(idx);
-        item.addEventListener('click', (e) => {
-          const target = e.target as HTMLElement;
-          if (target && (target.tagName === 'INPUT' || target.closest('input'))) return;
-          navigate();
-        });
-        item.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            navigate();
-          }
-        });
-
         list.appendChild(item);
       }
     }
@@ -745,6 +754,16 @@ function ensureStyles() {
     box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.45);
     transition: box-shadow 300ms ease;
   }
+
+  /* Subtle “jump” highlight on the scrolled-to Prompt */
+  @keyframes cwJumpFlash {
+    0%   { box-shadow: 0 0 0 2px rgba(59,130,246,.35), inset 0 0 0 9999px rgba(59,130,246,.08); }
+    100% { box-shadow: 0 0 0 0 rgba(59,130,246,0),      inset 0 0 0 0 rgba(59,130,246,0); }
+  }
+  [data-cw-role="user"].cw-jump-highlight {
+    animation: cwJumpFlash 1100ms ease-out 1;
+    border-radius: 10px;
+  }  
   `;
   (document.head || document.documentElement).appendChild(style);
 
