@@ -11,6 +11,7 @@ import { buildMarkdownExportByFormat } from './utils/exporters';
  *  - Adds a "Pure Markdown" export option (no embedded HTML)
  *  - Relabels "You/ChatGPT" -> "Prompt/Response" and unifies Prompt styling
  *  - Works even when the page lacks data-message-author-role (uses our own tags)
+ *  - NEW: Click an item in the list to scroll to that Prompt
  * ------------------------------------------------------------
  */
 
@@ -206,11 +207,8 @@ function getMessageTuples(): Array<{ el: HTMLElement; role: 'user' | 'assistant'
   return chosen;
 }
 
-/**
- * Build selected payload:
- * - User selects specific user turns; include each selected user turn
- *   plus all following turns until the next user turn.
- */
+// ---- Build selected payload --------------------------------
+
 function buildSelectedPayload(): { turns: ExportTurn[]; htmlBodies: string[] } {
   // Canonical list of message roots in visual order
   const tuples = getMessageTuples(); // [{ el: HTMLElement, role: 'user'|'assistant' }]
@@ -389,7 +387,7 @@ function setCollapsed(v: boolean) {
   if (toggleBtn) toggleBtn.textContent = v ? 'Show List' : 'Hide List';
 }
 
-// ---- Relabel + typography sync -----------------------------
+// ---- Relabel -----------------------------------------------
 
 function hideNativeRoleLabels(container: HTMLElement) {
   const selectors = [
@@ -469,6 +467,25 @@ function relabelAndRestyleMessages() {
   }
 }
 
+// ---- Jump-to-turn helper ----------------------------------
+
+function scrollPromptIntoViewByIndex(tupleIndex: number) {
+  const tuples = getMessageTuples();
+  const t = tuples[tupleIndex];
+  if (!t || t.role !== 'user') return;
+
+  const el = t.el;
+  const rect = el.getBoundingClientRect();
+  const absoluteTop = rect.top + window.scrollY;
+  const offset = 80; // adjust if your sticky header covers content
+  const targetY = Math.max(absoluteTop - offset, 0);
+
+  window.scrollTo({ top: targetY, behavior: 'smooth' });
+
+  // brief highlight to guide the eye
+  el.classList.add('cw-flash');
+  window.setTimeout(() => el.classList.remove('cw-flash'), 1200);
+}
 
 // ---- Floating UI -------------------------------------------
 
@@ -631,6 +648,9 @@ function ensureFloatingUI() {
         item.style.alignItems = 'flex-start';
         item.style.gap = '6px';
         item.style.margin = '4px 0';
+        item.style.cursor = 'pointer';
+        item.setAttribute('role', 'button');
+        item.tabIndex = 0;
 
         const cb = d.createElement('input');
         cb.type = 'checkbox';
@@ -647,6 +667,21 @@ function ensureFloatingUI() {
 
         item.appendChild(cb);
         item.appendChild(span);
+
+        // Click/keyboard to navigate (ignore direct clicks on the checkbox)
+        const navigate = () => scrollPromptIntoViewByIndex(idx);
+        item.addEventListener('click', (e) => {
+          const target = e.target as HTMLElement;
+          if (target && (target.tagName === 'INPUT' || target.closest('input'))) return;
+          navigate();
+        });
+        item.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            navigate();
+          }
+        });
+
         list.appendChild(item);
       }
     }
@@ -698,6 +733,12 @@ function ensureStyles() {
     display:block !important;
     margin: 0 0 6px 0 !important;
     font-weight:600 !important;
+  }
+
+  /* Flash highlight when a turn is navigated to */
+  [data-cw-role].cw-flash {
+    box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.45);
+    transition: box-shadow 300ms ease;
   }
   `;
   (document.head || document.documentElement).appendChild(style);
