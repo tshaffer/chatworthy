@@ -642,7 +642,7 @@ function ensureFloatingUI() {
       list.appendChild(empty);
     } else {
       for (const { idx, el: node } of userTuples) {
-        const item = d.createElement('label');
+        const item = d.createElement('div');
         item.className = 'chatworthy-item';
         item.style.display = 'flex';
         item.style.alignItems = 'flex-start';
@@ -654,9 +654,12 @@ function ensureFloatingUI() {
 
         const cb = d.createElement('input');
         cb.type = 'checkbox';
-        // Use the overall tuple index so buildSelectedPayload lines up
         cb.dataset.uindex = String(idx);
         cb.addEventListener('change', updateControlsState);
+
+        // prevent row click from firing when checkbox itself is clicked/pressed
+        cb.addEventListener('click', (e) => e.stopPropagation());
+        cb.addEventListener('keydown', (e) => e.stopPropagation());
 
         const span = d.createElement('span');
         span.className = 'chatworthy-item-text';
@@ -727,6 +730,8 @@ function ensureStyles() {
   }
   #${ROOT_ID} .chatworthy-toggle input { transform: translateY(0.5px); }
   #${ROOT_ID} label.chatworthy-item input[type="checkbox"] { margin-left: 2px; }
+  #${ROOT_ID} .chatworthy-item { cursor: pointer; }
+  #${ROOT_ID} .chatworthy-item input[type="checkbox"] { cursor: pointer; }
 
   /* label spacing */
   [data-cw-role] > .cw-role-label {
