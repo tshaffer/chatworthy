@@ -301,7 +301,7 @@ function normalizeTopic(chatTitle?: string, subject?: string): string | undefine
   return stripped || chatTitle.trim();
 }
 
-function runTest() {
+function getSubjectTopicAndChatTitle() {
   const { chatTitle, projectName } = getChatTitleAndProject();
 
   const subject = (projectName || (chatTitle?.split(/ - |:|–|—/)[0]?.trim() ?? '')).trim() || '';
@@ -312,28 +312,24 @@ function runTest() {
   console.log('chatTitle', chatTitle);
 
   return {
-    subject,      // "Chatalog"
-    topic,        // "Fixing imported notes"
-    chatTitle,    // keep full title if you want both
+    subject,
+    topic,
+    chatTitle,
   };
 }
 
 function buildExportFromTurns(
   turns: ExportTurn[],
-  subject = '',
-  topic = '',
-  notes = '',
   htmlBodies?: string[]
 ): string {
 
-  const foo = runTest();
-  console.log('foo', foo);
+  const { subject, topic, chatTitle } = getSubjectTopicAndChatTitle();
 
   const meta = {
     noteId: generateNoteId(),
     source: 'chatgpt',
     chatId: getChatIdFromUrl(location.href),
-    chatTitle: getTitle(),
+    chatTitle,
     pageUrl: location.href,
     exportedAt: new Date().toISOString(),
     model: undefined,
@@ -359,7 +355,7 @@ function buildExportFromTurns(
     turns,
     {
       title: meta.chatTitle,
-      freeformNotes: notes,
+      freeformNotes: '',
       includeFrontMatter: true,
       htmlBodies
     }
@@ -641,7 +637,7 @@ function ensureFloatingUI() {
             alert('Select at least one prompt to export.');
             return;
           }
-          const md = buildExportFromTurns(turns, '', '', '', htmlBodies);
+          const md = buildExportFromTurns(turns, htmlBodies);
           downloadExport(`${filenameBase()}.md`, md);
         } catch (err) {
           console.error('[chatworthy] export failed:', err);
