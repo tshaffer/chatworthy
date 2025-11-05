@@ -1,5 +1,6 @@
 // Mark as a module (good for TS/isolatedModules)
 
+import { getChatTitleAndProject } from './domExtractors';
 import type { ExportNoteMetadata, ExportTurn } from './types';
 import { buildMarkdownExportByFormat } from './utils/exporters';
 
@@ -282,6 +283,28 @@ function setExportFormat(fmt: ExportFormat) {
   try { localStorage.setItem(FORMAT_LS_KEY, fmt); } catch { /* ignore */ }
 }
 
+function runTest() {
+  const { chatTitle, projectName } = getChatTitleAndProject();
+
+  // subject/topic logic
+  const subject =
+    projectName
+    // if DOM didn’t yield a project, try to infer from chat title prefix “Subject – …”
+    || (chatTitle?.split(/ - |:|–|—/)[0]?.trim() || '');
+
+  const topic = chatTitle || 'Untitled Conversation';
+
+  console.log('subject', subject);
+  console.log('topic', topic);
+  console.log('chatTitle', topic);
+  return {
+    subject,                 // e.g., "Chatalog"
+    topic,                   // e.g., "Fixing imported notes"
+    chatTitle: topic,        // keep your existing field if you like
+    // ... rest of your YAML front matter
+  };
+}
+
 function buildExportFromTurns(
   turns: ExportTurn[],
   subject = '',
@@ -289,6 +312,10 @@ function buildExportFromTurns(
   notes = '',
   htmlBodies?: string[]
 ): string {
+
+  const foo = runTest();
+  console.log('foo', foo);
+  
   const meta = {
     noteId: generateNoteId(),
     source: 'chatgpt',
