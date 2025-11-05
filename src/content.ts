@@ -283,25 +283,38 @@ function setExportFormat(fmt: ExportFormat) {
   try { localStorage.setItem(FORMAT_LS_KEY, fmt); } catch { /* ignore */ }
 }
 
+function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeTopic(chatTitle?: string, subject?: string): string | undefined {
+  if (!chatTitle) return undefined;
+  if (!subject) return chatTitle.trim();
+
+  // Match "<subject> –/—/-/: " at the start (handles spaces).
+  const re = new RegExp(
+    `^\\s*${escapeRegex(subject)}\\s*(?:–|—|-|:)\\s*`,
+    'iu' // i = case-insensitive, u = unicode
+  );
+
+  const stripped = chatTitle.replace(re, '').trim();
+  return stripped || chatTitle.trim();
+}
+
 function runTest() {
   const { chatTitle, projectName } = getChatTitleAndProject();
 
-  // subject/topic logic
-  const subject =
-    projectName
-    // if DOM didn’t yield a project, try to infer from chat title prefix “Subject – …”
-    || (chatTitle?.split(/ - |:|–|—/)[0]?.trim() || '');
-
-  const topic = chatTitle || 'Untitled Conversation';
+  const subject = (projectName || (chatTitle?.split(/ - |:|–|—/)[0]?.trim() ?? '')).trim() || '';
+  const topic = normalizeTopic(chatTitle, subject) || 'Untitled Conversation';
 
   console.log('subject', subject);
   console.log('topic', topic);
-  console.log('chatTitle', topic);
+  console.log('chatTitle', chatTitle);
+
   return {
-    subject,                 // e.g., "Chatalog"
-    topic,                   // e.g., "Fixing imported notes"
-    chatTitle: topic,        // keep your existing field if you like
-    // ... rest of your YAML front matter
+    subject,      // "Chatalog"
+    topic,        // "Fixing imported notes"
+    chatTitle,    // keep full title if you want both
   };
 }
 
@@ -315,7 +328,7 @@ function buildExportFromTurns(
 
   const foo = runTest();
   console.log('foo', foo);
-  
+
   const meta = {
     noteId: generateNoteId(),
     source: 'chatgpt',
