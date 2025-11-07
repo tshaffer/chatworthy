@@ -37,19 +37,25 @@ function parseFrontMatter(md: string): Partial<ExportNoteMetadata> & { chatTitle
 
 function normalizeDynamic(s: string): string {
   return s
-    // front-matter dynamic keys
+    // dynamic keys in front-matter
     .replace(/^noteId: .+$/m, 'noteId: NOTE_ID')
     .replace(/^chatId: .+$/m, 'chatId: CHAT_ID')
     .replace(/^pageUrl: .+$/m, 'pageUrl: https://example.com/c/CHAT_ID')
     .replace(/^exportedAt: .+$/m, 'exportedAt: 2000-01-01T00:00:00.000Z')
-    // remove meta rows entirely
+
+    // remove meta rows in the body (your goldens don’t have them)
     .replace(/^Source:\s.*$/gm, '')
     .replace(/^Exported:\s.*$/gm, '')
-    // remove the TOC heading line (keep items)
+
+    // remove the TOC heading (but keep its items)
     .replace(/^\s*##\s+Table of Contents\s*$(?:\r?\n)?/gmi, '')
-    // collapse extra blank lines left by removals
+
+    // NEW: if the TOC heading left extra blank lines, collapse them
+    // so that the numbered item starts right away.
+    .replace(/\n+(?=\d+\.\s+\[)/g, '\n')
+
+    // general whitespace/EOL normalization
     .replace(/\n{3,}/g, '\n\n')
-    // normalize EOLs + trim
     .replace(/\r\n/g, '\n')
     .trimEnd();
 }
@@ -94,6 +100,7 @@ function run(pairBase: string) {
       title: meta.chatTitle,
       includeFrontMatter: true,
       htmlBodies: [],          // text-only path is fine for parity here
+      // htmlBodies: new Array(turns.length).fill(''),
       includeToc: true,
       freeformNotes: '',
       includeMetaRow: false
