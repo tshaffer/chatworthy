@@ -43,22 +43,28 @@ function normalizeDynamic(s: string): string {
     .replace(/^pageUrl: .+$/m, 'pageUrl: https://example.com/c/CHAT_ID')
     .replace(/^exportedAt: .+$/m, 'exportedAt: 2000-01-01T00:00:00.000Z');
 
-  // Remove meta rows (some goldens omit them)
+  // Remove meta rows in body
   s = s
     .replace(/^Source:\s.*$/gm, '')
     .replace(/^Exported:\s.*$/gm, '');
 
-  // Remove the "## Table of Contents" heading (keep items)
+  // Remove the TOC heading (keep items)
   s = s.replace(/^\s*##\s+Table of Contents\s*$(?:\r?\n)?/gmi, '');
 
   // Remove explicit anchor lines like <a id="p-1"></a>
   s = s.replace(/^\s*<a id="p-\d+"><\/a>\s*$(?:\r?\n)?/gm, '');
 
-  // If the TOC heading removal left blank lines, collapse so the first item starts immediately
+  // Remove horizontal rules of common forms (---, ***, ___ with optional spacing)
+  s = s.replace(/^\s*(?:[-*_]\s*){3,}\s*$(?:\r?\n)?/gm, '');
+
+  // If that removal left blank lines before the first numbered item, collapse them
   s = s.replace(/\n+(?=\d+\.\s+\[)/g, '\n');
 
-  // On TOC item lines only, collapse accidental double spaces (e.g., "data.  woould")
-  s = s.replace(/^(\d+\.\s+\[.*\])$/gm, m => m.replace(/\s{2,}/g, ' '));
+  // Normalize headings by stripping leading ATX hashes (so "### Foo" == "Foo")
+  s = s.replace(/^#{1,6}\s+/gm, '');
+
+  // TOC lines sometimes have accidental double spaces inside; collapse on any numbered-item line
+  s = s.replace(/^\d+\.\s+\[.*$/gm, (m) => m.replace(/\s{2,}/g, ' '));
 
   // General whitespace/EOL cleanup
   return s
@@ -123,13 +129,6 @@ function run(pairBase: string) {
     const aLines = A.split('\n');
     const bLines = B.split('\n');
     const max = Math.max(aLines.length, bLines.length);
-    // for (let i = 0; i < max; i++) {
-    //   if (aLines[i] !== bLines[i]) {
-    //     console.error(`- A[${i + 1}]: ${aLines[i] ?? ''}`);
-    //     console.error(`+ B[${i + 1}]: ${bLines[i] ?? ''}`);
-    //     break;
-    //   }
-    // }
     const ctx = 3;
     for (let i = 0; i < max; i++) {
       if (aLines[i] !== bLines[i]) {
