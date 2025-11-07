@@ -100,17 +100,17 @@ function run(pairBase: string) {
   const meta = fixedMeta(fmInfo);
 
   const mdFromTurns = buildMarkdownExportByFormat(
-  'markdown_pure',
-  meta,
-  turns,
-  {
-    title: meta.chatTitle,
-    includeFrontMatter: true,
-    htmlBodies: [],        // ← run the text-only path (Node-safe)
-    includeToc: true,
-    freeformNotes: ''
-  }
-);
+    'markdown_pure',
+    meta,
+    turns,
+    {
+      title: meta.chatTitle,
+      includeFrontMatter: true,
+      htmlBodies: [],        // ← run the text-only path (Node-safe)
+      includeToc: true,
+      freeformNotes: ''
+    }
+  );
 
   const A = normalizeDynamic(mdFromTurns);
   const B = normalizeDynamic(mdGolden);
@@ -123,10 +123,22 @@ function run(pairBase: string) {
     const aLines = A.split('\n');
     const bLines = B.split('\n');
     const max = Math.max(aLines.length, bLines.length);
+    // for (let i = 0; i < max; i++) {
+    //   if (aLines[i] !== bLines[i]) {
+    //     console.error(`- A[${i + 1}]: ${aLines[i] ?? ''}`);
+    //     console.error(`+ B[${i + 1}]: ${bLines[i] ?? ''}`);
+    //     break;
+    //   }
+    // }
+    const ctx = 3;
     for (let i = 0; i < max; i++) {
       if (aLines[i] !== bLines[i]) {
-        console.error(`- A[${i + 1}]: ${aLines[i] ?? ''}`);
-        console.error(`+ B[${i + 1}]: ${bLines[i] ?? ''}`);
+        const start = Math.max(0, i - ctx);
+        const end = Math.min(max, i + ctx + 1);
+        console.error('--- A (generated) ---');
+        for (let k = start; k < end; k++) console.error(`[${k + 1}] ${aLines[k] ?? ''}`);
+        console.error('--- B (golden) ------');
+        for (let k = start; k < end; k++) console.error(`[${k + 1}] ${bLines[k] ?? ''}`);
         break;
       }
     }
