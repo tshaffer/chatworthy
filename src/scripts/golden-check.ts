@@ -94,8 +94,6 @@ function run(pairBase: string) {
       htmlBodies: [],          // text-only path is fine for parity here
       includeToc: true,
       freeformNotes: '',
-      // NEW: match your golden outputs (no meta row)
-      // @ts-expect-error includeMetaRow is accepted by your exporter
       includeMetaRow: false
     }
   );
