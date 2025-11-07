@@ -70,27 +70,26 @@ function normalizeDynamic(s: string): string {
     .replace(/_(.*?)_/g, '$1');
 
   // ---- TOC space collapse:
-  // a) If items still have numbers
   s = s.replace(/^\d+\.\s+\[.*$/gm, (m) => m.replace(/\s{2,}/g, ' '));
-  // b) If numbering was stripped and the line now starts with a link
-  s = s.replace(/^\[.*$/gm, (m) => m.replace(/\s{2,}/g, ' '));  // ← NEW
+  s = s.replace(/^\[.*$/gm, (m) => m.replace(/\s{2,}/g, ' '));
 
-  // ---- Indentation parity: remove small leading indents (goldens sometimes indent detail lines)
-  s = s.replace(/^[ ]{1,4}(?=\S)/gm, '');  // ← NEW (strips up to 4 leading spaces on non-blank lines)
+  // ---- Indentation parity (keep this)
+  s = s.replace(/^[ ]{1,4}(?=\S)/gm, '');
 
-  // --- Emoji section titles: normalize blank lines before/after
-  s = s.replace(/\n\n(?=(?:🇮🇹|🧽))/g, '\n');          // no extra blank line BEFORE emoji titles
-  s = s.replace(/^((?:🇮🇹|🧽)[^\n]*)\n\n/gm, '$1\n');   // no extra blank line AFTER emoji titles
+  // ---- Treat hyphen bullets as plain lines (e.g., "-   Day 1:" → "Day 1:")
+  s = s.replace(/^\s*-\s{1,3}(?=\S)/gm, '');   // ← ADD THIS LINE
+
+  // ---- Emoji section titles: normalize blank lines before/after (keep these)
+  s = s.replace(/\n\n(?=(?:🇮🇹|🧽))/g, '\n');
+  s = s.replace(/^((?:🇮🇹|🧽)[^\n]*)\n\n/gm, '$1\n');
 
   // ---- Whitespace cleanup
   s = s
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/\r\n/g, '\n');
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{2,}/g, '\n')                 // ← CHANGE: collapse ANY 2+ newlines to 1
+    .trimEnd();
 
-  // Optionally remove fully blank lines and then collapse doubles to singles:
-  // s = s.replace(/^\s*$/gm, '').replace(/\n{2,}/g, '\n');
-
-  return s.trimEnd();
+  return s;
 }
 
 function fixedMeta(base: Partial<ExportNoteMetadata>): ExportNoteMetadata {
