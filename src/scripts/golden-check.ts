@@ -42,12 +42,14 @@ function normalizeDynamic(s: string): string {
     .replace(/^chatId: .+$/m, 'chatId: CHAT_ID')
     .replace(/^pageUrl: .+$/m, 'pageUrl: https://example.com/c/CHAT_ID')
     .replace(/^exportedAt: .+$/m, 'exportedAt: 2000-01-01T00:00:00.000Z')
-    // REMOVE meta-row lines entirely (your goldens don't have them)
-    .replace(/^Source: .+$/gm, '')
-    .replace(/^Exported: .+$/gm, '')
-    // collapse any double blank lines left by removals
+    // remove meta rows entirely
+    .replace(/^Source:\s.*$/gm, '')
+    .replace(/^Exported:\s.*$/gm, '')
+    // remove the TOC heading line (keep items)
+    .replace(/^\s*##\s+Table of Contents\s*$(?:\r?\n)?/gmi, '')
+    // collapse extra blank lines left by removals
     .replace(/\n{3,}/g, '\n\n')
-    // EOLs + trim
+    // normalize EOLs + trim
     .replace(/\r\n/g, '\n')
     .trimEnd();
 }
