@@ -36,41 +36,47 @@ function parseFrontMatter(md: string): Partial<ExportNoteMetadata> & { chatTitle
 }
 
 function normalizeDynamic(s: string): string {
-  // Mask front-matter fields that vary
+  // ---- Mask dynamic front-matter fields
   s = s
     .replace(/^noteId: .+$/m, 'noteId: NOTE_ID')
     .replace(/^chatId: .+$/m, 'chatId: CHAT_ID')
     .replace(/^pageUrl: .+$/m, 'pageUrl: https://example.com/c/CHAT_ID')
     .replace(/^exportedAt: .+$/m, 'exportedAt: 2000-01-01T00:00:00.000Z');
 
-  // Remove meta rows in body
+  // ---- Remove meta rows in body (present in fallback path only)
   s = s
     .replace(/^Source:\s.*$/gm, '')
     .replace(/^Exported:\s.*$/gm, '');
 
-  // Remove the TOC heading (keep items)
-  s = s.replace(/^\s*##\s+Table of Contents\s*$(?:\r?\n)?/gmi, '');
+  // ---- TOC: drop the heading, keep items; remove explicit anchors
+  s = s
+    .replace(/^\s*##\s+Table of Contents\s*$(?:\r?\n)?/gmi, '')
+    .replace(/^\s*<a id="p-\d+"><\/a>\s*$(?:\r?\n)?/gm, '');
 
-  // Remove explicit anchor lines like <a id="p-1"></a>
-  s = s.replace(/^\s*<a id="p-\d+"><\/a>\s*$(?:\r?\n)?/gm, '');
-
-  // Remove horizontal rules of common forms (---, ***, ___ with optional spacing)
+  // ---- Horizontal rules (***, --- , ___) → remove
   s = s.replace(/^\s*(?:[-*_]\s*){3,}\s*$(?:\r?\n)?/gm, '');
 
-  // If that removal left blank lines before the first numbered item, collapse them
-  s = s.replace(/\n+(?=\d+\.\s+\[)/g, '\n');
-
-  // Normalize headings by stripping leading ATX hashes (so "### Foo" == "Foo")
+  // ---- Headings: strip ATX hashes so "### Foo" == "Foo"
   s = s.replace(/^#{1,6}\s+/gm, '');
 
-  // TOC lines sometimes have accidental double spaces inside; collapse on any numbered-item line
+  // ---- Lists: normalize ordered-list "1. **Title**" → "Title"
+  s = s.replace(/^\s*\d+\.\s+(?:\*\*)?(.+?)(?:\*\*)?\s*$/gm, '$1');
+
+  // ---- Emphasis: drop bold/italic markers globally (content parity over styling)
+  s = s.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/__(.*?)__/g, '$1').replace(/_(.*?)_/g, '$1');
+
+  // ---- TOC item lines: collapse accidental double spaces
   s = s.replace(/^\d+\.\s+\[.*$/gm, (m) => m.replace(/\s{2,}/g, ' '));
 
-  // General whitespace/EOL cleanup
-  return s
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/\r\n/g, '\n')
-    .trimEnd();
+  // ---- Whitespace:
+  //  a) remove lines that are entirely blank
+  s = s.replace(/^\s*$/gm, '');
+  //  b) collapse 2+ newlines to 1 newline
+  s = s.replace(/\n{2,}/g, '\n');
+  //  c) normalize EOLs + trim
+  s = s.replace(/\r\n/g, '\n').trimEnd();
+
+  return s;
 }
 
 function fixedMeta(base: Partial<ExportNoteMetadata>): ExportNoteMetadata {
