@@ -258,7 +258,7 @@ function htmlToMarkdown(html: string): string {
 function toPureMarkdownChatStyleFromHtml(
   meta: ExportNoteMetadata,
   turns: ExportTurn[],
-  htmlBodies: string[], // 1:1 with turns
+  htmlBodies: [],
   opts?: {
     title?: string;
     includeFrontMatter?: boolean;

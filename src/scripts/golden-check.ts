@@ -36,25 +36,32 @@ function parseFrontMatter(md: string): Partial<ExportNoteMetadata> & { chatTitle
 }
 
 function normalizeDynamic(s: string): string {
-  return s
-    // dynamic keys in front-matter
+  // Mask front-matter fields that vary
+  s = s
     .replace(/^noteId: .+$/m, 'noteId: NOTE_ID')
     .replace(/^chatId: .+$/m, 'chatId: CHAT_ID')
     .replace(/^pageUrl: .+$/m, 'pageUrl: https://example.com/c/CHAT_ID')
-    .replace(/^exportedAt: .+$/m, 'exportedAt: 2000-01-01T00:00:00.000Z')
+    .replace(/^exportedAt: .+$/m, 'exportedAt: 2000-01-01T00:00:00.000Z');
 
-    // remove meta rows in the body (your goldens don’t have them)
+  // Remove meta rows (some goldens omit them)
+  s = s
     .replace(/^Source:\s.*$/gm, '')
-    .replace(/^Exported:\s.*$/gm, '')
+    .replace(/^Exported:\s.*$/gm, '');
 
-    // remove the TOC heading (but keep its items)
-    .replace(/^\s*##\s+Table of Contents\s*$(?:\r?\n)?/gmi, '')
+  // Remove the "## Table of Contents" heading (keep items)
+  s = s.replace(/^\s*##\s+Table of Contents\s*$(?:\r?\n)?/gmi, '');
 
-    // NEW: if the TOC heading left extra blank lines, collapse them
-    // so that the numbered item starts right away.
-    .replace(/\n+(?=\d+\.\s+\[)/g, '\n')
+  // Remove explicit anchor lines like <a id="p-1"></a>
+  s = s.replace(/^\s*<a id="p-\d+"><\/a>\s*$(?:\r?\n)?/gm, '');
 
-    // general whitespace/EOL normalization
+  // If the TOC heading removal left blank lines, collapse so the first item starts immediately
+  s = s.replace(/\n+(?=\d+\.\s+\[)/g, '\n');
+
+  // On TOC item lines only, collapse accidental double spaces (e.g., "data.  woould")
+  s = s.replace(/^(\d+\.\s+\[.*\])$/gm, m => m.replace(/\s{2,}/g, ' '));
+
+  // General whitespace/EOL cleanup
+  return s
     .replace(/\n{3,}/g, '\n\n')
     .replace(/\r\n/g, '\n')
     .trimEnd();
@@ -93,19 +100,17 @@ function run(pairBase: string) {
   const meta = fixedMeta(fmInfo);
 
   const mdFromTurns = buildMarkdownExportByFormat(
-    'markdown_pure',
-    meta,
-    turns,
-    {
-      title: meta.chatTitle,
-      includeFrontMatter: true,
-      htmlBodies: [],          // text-only path is fine for parity here
-      // htmlBodies: new Array(turns.length).fill(''),
-      includeToc: true,
-      freeformNotes: '',
-      includeMetaRow: false
-    }
-  );
+  'markdown_pure',
+  meta,
+  turns,
+  {
+    title: meta.chatTitle,
+    includeFrontMatter: true,
+    htmlBodies: [],        // ← run the text-only path (Node-safe)
+    includeToc: true,
+    freeformNotes: ''
+  }
+);
 
   const A = normalizeDynamic(mdFromTurns);
   const B = normalizeDynamic(mdGolden);
