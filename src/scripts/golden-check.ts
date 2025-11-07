@@ -78,6 +78,10 @@ function normalizeDynamic(s: string): string {
   // ---- Indentation parity: remove small leading indents (goldens sometimes indent detail lines)
   s = s.replace(/^[ ]{1,4}(?=\S)/gm, '');  // ← NEW (strips up to 4 leading spaces on non-blank lines)
 
+  // --- Emoji section titles: normalize blank lines before/after
+  s = s.replace(/\n\n(?=(?:🇮🇹|🧽))/g, '\n');          // no extra blank line BEFORE emoji titles
+  s = s.replace(/^((?:🇮🇹|🧽)[^\n]*)\n\n/gm, '$1\n');   // no extra blank line AFTER emoji titles
+
   // ---- Whitespace cleanup
   s = s
     .replace(/\n{3,}/g, '\n\n')
