@@ -352,6 +352,7 @@ export function buildMarkdownExportByFormat(
     title?: string;
     freeformNotes?: string;
     includeFrontMatter?: boolean;
+    includeMetaRow?: boolean;
     htmlBodies?: string[]; // required for Pure MD
     includeToc?: boolean;  // NEW: default true for Pure MD
   }
@@ -418,7 +419,7 @@ export function buildMarkdownExportByFormat(
       {
         title: metaWithTitle.chatTitle,
         includeFrontMatter: opts?.includeFrontMatter ?? true,
-        includeMetaRow: true,
+        includeMetaRow: opts?.includeMetaRow ?? true,
         hrBetween: true,
         freeformNotes: opts?.freeformNotes,
         includeToc,

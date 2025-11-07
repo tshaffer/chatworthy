@@ -230,6 +230,8 @@ function buildSelectedPayload(): { turns: ExportTurn[]; htmlBodies: string[] } {
     }
   }
 
+  console.log(JSON.stringify(turns, null, 2));
+
   return { turns, htmlBodies };
 }
 

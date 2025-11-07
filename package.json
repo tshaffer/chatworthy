@@ -9,6 +9,7 @@
     "clean": "rm -rf dist && mkdir -p dist"
   },
   "devDependencies": {
+    "@types/node": "^24.10.0",
     "chrome-types": "^0.1.260",
     "esbuild": "^0.24.0",
     "tsx": "^4.19.0"
