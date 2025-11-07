@@ -83,6 +83,9 @@ function normalizeDynamic(s: string): string {
   s = s.replace(/\n\n(?=(?:🇮🇹|🧽))/g, '\n');
   s = s.replace(/^((?:🇮🇹|🧽)[^\n]*)\n\n/gm, '$1\n');
 
+  // Collapse double+ spaces inside blockquote lines only
+  s = s.replace(/^> .+$/gm, (m) => m.replace(/\s{2,}/g, ' '));
+
   // ---- Whitespace cleanup
   s = s
     .replace(/\r\n/g, '\n')
