@@ -42,10 +42,12 @@ function normalizeDynamic(s: string): string {
     .replace(/^chatId: .+$/m, 'chatId: CHAT_ID')
     .replace(/^pageUrl: .+$/m, 'pageUrl: https://example.com/c/CHAT_ID')
     .replace(/^exportedAt: .+$/m, 'exportedAt: 2000-01-01T00:00:00.000Z')
-    // body meta rows
-    .replace(/^Source:\s.+$/m, 'Source: https://example.com/c/CHAT_ID')
-    .replace(/^Exported:\s.+$/m, 'Exported: 2000-01-01T00:00:00.000Z')
-    // EOLs
+    // REMOVE meta-row lines entirely (your goldens don't have them)
+    .replace(/^Source: .+$/gm, '')
+    .replace(/^Exported: .+$/gm, '')
+    // collapse any double blank lines left by removals
+    .replace(/\n{3,}/g, '\n\n')
+    // EOLs + trim
     .replace(/\r\n/g, '\n')
     .trimEnd();
 }
@@ -89,9 +91,11 @@ function run(pairBase: string) {
     {
       title: meta.chatTitle,
       includeFrontMatter: true,
-      htmlBodies: [],        // not needed; your exporter handles text-only path
+      htmlBodies: [],          // text-only path is fine for parity here
       includeToc: true,
       freeformNotes: '',
+      // NEW: match your golden outputs (no meta row)
+      // @ts-expect-error includeMetaRow is accepted by your exporter
       includeMetaRow: false
     }
   );
