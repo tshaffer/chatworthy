@@ -43,40 +43,50 @@ function normalizeDynamic(s: string): string {
     .replace(/^pageUrl: .+$/m, 'pageUrl: https://example.com/c/CHAT_ID')
     .replace(/^exportedAt: .+$/m, 'exportedAt: 2000-01-01T00:00:00.000Z');
 
-  // ---- Remove meta rows in body (present in fallback path only)
+  // ---- Remove meta rows in body
   s = s
     .replace(/^Source:\s.*$/gm, '')
     .replace(/^Exported:\s.*$/gm, '');
 
-  // ---- TOC: drop the heading, keep items; remove explicit anchors
+  // ---- TOC heading & anchors
   s = s
     .replace(/^\s*##\s+Table of Contents\s*$(?:\r?\n)?/gmi, '')
     .replace(/^\s*<a id="p-\d+"><\/a>\s*$(?:\r?\n)?/gm, '');
 
-  // ---- Horizontal rules (***, --- , ___) → remove
+  // ---- Horizontal rules
   s = s.replace(/^\s*(?:[-*_]\s*){3,}\s*$(?:\r?\n)?/gm, '');
 
-  // ---- Headings: strip ATX hashes so "### Foo" == "Foo"
+  // ---- Strip ATX heading hashes
   s = s.replace(/^#{1,6}\s+/gm, '');
 
-  // ---- Lists: normalize ordered-list "1. **Title**" → "Title"
+  // ---- Lists: "1. **Title**" → "Title"
   s = s.replace(/^\s*\d+\.\s+(?:\*\*)?(.+?)(?:\*\*)?\s*$/gm, '$1');
 
-  // ---- Emphasis: drop bold/italic markers globally (content parity over styling)
-  s = s.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/__(.*?)__/g, '$1').replace(/_(.*?)_/g, '$1');
+  // ---- Emphasis: remove bold/italic markers
+  s = s
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/_(.*?)_/g, '$1');
 
-  // ---- TOC item lines: collapse accidental double spaces
+  // ---- TOC space collapse:
+  // a) If items still have numbers
   s = s.replace(/^\d+\.\s+\[.*$/gm, (m) => m.replace(/\s{2,}/g, ' '));
+  // b) If numbering was stripped and the line now starts with a link
+  s = s.replace(/^\[.*$/gm, (m) => m.replace(/\s{2,}/g, ' '));  // ← NEW
 
-  // ---- Whitespace:
-  //  a) remove lines that are entirely blank
-  s = s.replace(/^\s*$/gm, '');
-  //  b) collapse 2+ newlines to 1 newline
-  s = s.replace(/\n{2,}/g, '\n');
-  //  c) normalize EOLs + trim
-  s = s.replace(/\r\n/g, '\n').trimEnd();
+  // ---- Indentation parity: remove small leading indents (goldens sometimes indent detail lines)
+  s = s.replace(/^[ ]{1,4}(?=\S)/gm, '');  // ← NEW (strips up to 4 leading spaces on non-blank lines)
 
-  return s;
+  // ---- Whitespace cleanup
+  s = s
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\r\n/g, '\n');
+
+  // Optionally remove fully blank lines and then collapse doubles to singles:
+  // s = s.replace(/^\s*$/gm, '').replace(/\n{2,}/g, '\n');
+
+  return s.trimEnd();
 }
 
 function fixedMeta(base: Partial<ExportNoteMetadata>): ExportNoteMetadata {
